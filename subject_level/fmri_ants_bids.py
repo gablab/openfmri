@@ -291,6 +291,150 @@ def create_reg_workflow(name='registration'):
 
     return register
 
+def create_topup_workflow(num_slices, orig_pe_dir, readout,
+                          readout_topup, name='topup'):
+    """Create a geometric distortion correction workflow using TOPUP 
+    Parameters
+    ----------
+    name : name of workflow (default: 'topup')
+    Inputs::
+        inputspec.realigned_files : realigned bold time series files
+        inputspec.ref_file : reference image to register TOPUP images to realigned files
+        inputspec.topup_AP : merged TOPUP images in AP phase-encoding direction
+        inputspec.topup_PA : merged TOPUP images in PA phase-encoding direction
+    Outputs::
+        outputspec.topup_encoding_file : acquisition parameter text file for TOPUP files
+        outputspec.bold_encoding_file : acquisition parameter text file for bold file
+        outputspec.topup_fieldcoef : spline coefficients encoding the off-resonance field
+        outputspec.topup_movpar : TOPUP movement parameters output file 
+        outputspec.topup_corrected : corrected TOPUP file
+        outputspec.applytopup_corrected : corrected bold time series 
+    """        
+
+    def write_encoding_file(readout, fname, direction):
+        import os
+        filename = os.path.join(os.getcwd(), 'acq_param_%s.txt' % fname)
+        with open(filename, 'w') as f:  
+            f.writelines(['0 %d 0 %s\n' % (direction, readout),    
+                         '0 %d 0 %s\n' % (direction * -1, readout)])
+        return filename
+
+    topup = Workflow(name=name)
+
+    inputnode = Node(interface=IdentityInterface(fields=['realigned_files',
+                                                         'ref_file',
+                                                         'topup_AP',
+                                                         'topup_PA'
+                                                         ]),
+                     name='inputspec')
+
+    outputnode = Node(interface=IdentityInterface(fields=['topup_encoding_file',
+                                                          'bold_encoding_file',
+                                                          'topup_fieldcoef',
+                                                          'topup_movpar',
+                                                          'topup_corrected',
+                                                          'applytopup_corrected'
+                                                          ]),
+                      name='outputspec')
+
+    pe_dirs = {'j-':-1, 'j':1} #AP:j-, PA:j
+    
+    opp_pe_dir = [pe_dir for pe_dir in pe_dirs.keys() if pe_dir != orig_pe_dir][0]
+
+    topup2median = Node(fsl.FLIRT(out_file='orig2median.nii.gz', 
+                                  output_type='NIFTI_GZ', interp='spline'), 
+                        name='orig2median')
+    topup2median.inputs.dof = 6
+    topup2median.inputs.out_matrix_file = 'orig2median'
+
+    applyxfm = Node(fsl.ApplyXfm(out_file='opp2median.nii.gz' 
+                                 apply_xfm=True, interp='spline', output_type='NIFTI_GZ'),
+                    name='applyxfm')        
+    topup.connect(topup2median, 'out_matrix_file', applyxfm, 'in_matrix_file')
+
+    make_topup_list = Node(Merge(2), name='make_topup_list')
+    topup.connect(topup2median, 'out_file', make_topup_list, 'in1')
+    topup.connect(applyxfm, 'out_file', make_topup_list, 'in2')
+
+    merge_topup = Node(fsl.Merge(dimension='t', output_type='NIFTI_GZ'), 
+                        name='merge_topup')
+    topup.connect(make_topup_list, 'out', merge_topup, 'in_files')
+
+    file_writer_topup = Node(Function(input_names=['readout', 'fname',
+                                                   'direction'],
+                                output_names=['encoding_file'],
+                                function=write_encoding_file),
+                       name='file_writer_topup')
+    file_writer_topup.inputs.readout = readout_topup
+    file_writer_topup.inputs.fname = 'topup'
+    file_writer_topup.inputs.direction = pe_dirs[orig_pe_dir]
+
+    run_topup = Node(fsl.TOPUP(out_corrected='b0correct.nii.gz', numprec='float', 
+                        config='b02b0.cnf', output_type='NIFTI_GZ'), 
+                    name='run_topup')
+    topup.connect(file_writer_topup, 'encoding_file', run_topup, 'encoding_file')
+
+    applytopup = Node(fsl.ApplyTOPUP(output_type='NIFTI_GZ'), name='applytopup')
+    applytopup.inputs.in_index = [1]
+    applytopup.inputs.method = 'jac'   
+
+    file_writer_ts = file_writer_topup.clone(name='file_writer_ts')
+    file_writer_ts.inputs.readout = readout
+    file_writer_ts.inputs.fname = 'bold_ts'
+
+    topup.connect(merge_topup, 'merged_file', run_topup, 'in_file')
+    topup.connect(file_writer_ts, 'encoding_file', applytopup, 'encoding_file')
+    topup.connect(run_topup, 'out_fieldcoef', applytopup, 'in_topup_fieldcoef')
+    topup.connect(run_topup, 'out_movpar', applytopup, 'in_topup_movpar')
+
+    if num_slices % 2 != 0:
+
+        rm_slice_ts = Node(fsl.ExtractROI(), name='rm_slice_ts')        
+        rm_slice_ts.inputs.crop_list = [(0,-1), (0,-1), (0, num_slices-1), (0,-1)]
+
+        rm_slice_ref = Node(fsl.ExtractROI(), name='rm_slice_ref') 
+        rm_slice_ref.inputs.crop_list = [(0,-1),(0,-1),(0, num_slices-1),(0,1)]
+
+        extract_main = rm_slice_ref.clone(name='extract_%s' % orig_pe_dir) 
+
+        extract_opp = extract_main.clone(name='extract_%s' % opp_pe_dir)  
+
+        topup.connect([(inputnode, rm_slice_ts, [('realigned_files', 'in_file')]),
+                     (rm_slice_ts, applytopup, [('roi_file', 'in_files')]),
+                     (inputnode, rm_slice_ref, [('ref_file', 'in_file')]),
+                     (rm_slice_ref, topup2median, [('roi_file', 'reference')]),
+                     (rm_slice_ref, applyxfm, [('roi_file', 'reference')])
+                     ])
+
+    else:
+        topup.connect([(inputnode, applytopup, [('realigned_files', 'in_files')]),
+                     (inputnode, topup2median, [('ref_file', 'reference')]),
+                     (inputnode, applyxfm, [('ref_file', 'reference')])])
+
+        extract_main = Node(fsl.ExtractROI(), name='extract_orig') 
+        extract_main.inputs.crop_list = [(0,-1), (0,-1), (0,-1), (0,1)]
+
+        extract_opp = extract_main.clone(name='extract_opp')
+
+    if orig_pe_dir == 'AP':
+        topup.connect(inputnode, 'topup_AP', extract_main, 'in_file')
+        topup.connect(inputnode, 'topup_PA', extract_opp, 'in_file')
+    elif orig_pe_dir == 'PA':
+        topup.connect(inputnode, 'topup_PA', extract_main, 'in_file')
+        topup.connect(inputnode, 'topup_AP', extract_opp, 'in_file')
+
+    topup.connect(extract_main, 'roi_file', topup2median, 'in_file')
+    topup.connect(extract_opp, 'roi_file', applyxfm, 'in_file')
+
+    topup.connect(file_writer_topup, 'encoding_file', outputnode, 'topup_encoding_file')
+    topup.connect(file_writer_ts, 'encoding_file', outputnode, 'bold_encoding_file')
+    topup.connect(run_topup, 'out_fieldcoef', outputnode, 'topup_fieldcoef')
+    topup.connect(run_topup, 'out_movpar', outputnode, 'topup_movpar')
+    topup.connect(run_topup, 'out_corrected', outputnode, 'topup_corrected')
+    topup.connect(applytopup, 'out_corrected', outputnode, 'applytopup_corrected')
+
+    return topup
+
 def get_aparc_aseg(files):
     """Return the aparc+aseg.mgz file"""
     for name in files:
@@ -523,6 +667,33 @@ def create_fs_reg_workflow(name='registration'):
 
     return register
 
+"""
+Get info for topup correction
+"""
+
+def get_topup_info(bold):
+        import os
+        import json
+        from bids.grabbids import BIDSLayout
+        # hacky data directory
+        layout = BIDSLayout(bold.split('sub-')[0])
+
+        # corresponding fieldmaps
+        if 'epi' in layout.get_fieldmap(bold)['type']:
+            fmaps = layout.get_fieldmap(bold)['epi']
+            for fmap in fmaps:
+                if 'dir-AP' in fmap:
+                    topup_AP = fmap
+                elif 'dir-PA' in fmap:
+                    topup_PA = fmap
+                readout_topup = layout.get_metadata(fmap)['TotalReadoutTime']
+        # metainfo
+        orig_info = layout.get_metadata(bold)
+        num_slices, orig_pe_dir, readout = orig_info['dcmmeta_shape'][3], \
+        orig_info['PhaseEncodingDirection'], \
+        (orig_info['dcmmeta_shape'][0] - 1) * orig_info['EffectiveEchoSpacing']
+        return num_slices, orig_pe_dir, readout, topup_AP, topup_PA, readout_topup
+
 
 """
 Get info for a given subject
@@ -738,7 +909,7 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
     datasource.inputs.base_directory = data_dir
     datasource.inputs.template = '*'
     
-########## 6/23/16 replace behav with events.tsv
+    #### 6/23/16 replace behav with events.tsv
     if has_contrast:
 
         if session_id is None:
@@ -901,7 +1072,6 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
 
     # Comute TSNR on realigned data regressing polynomials upto order 2
     tsnr = MapNode(TSNR(regress_poly=2), iterfield=['in_file'], name='tsnr')
-    wf.connect(preproc, "outputspec.realigned_files", tsnr, "in_file")
     tsnr.plugin_args = {'qsub_args': '-pe orte 4',
                        'sbatch_args': '--mem=16G -c 4'}
 
@@ -911,8 +1081,39 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
                                 function=median,
                                 imports=imports),
                        name='median')
-    wf.connect(tsnr, 'detrended_file', calc_median, 'in_files')
 
+    # Output median independent of TOPUP
+    recalc_median = calc_median.clone(name='recalc_median')
+    
+    """
+    Geometric distortion correction using TOPUP
+    """
+    if do_topup:
+        topup_info = Node(Function(input_names=['bold'],
+                                   output_names=['num_slices',
+                                                 'orig_pe_dir',
+                                                 'readout',
+                                                 'topup_AP',
+                                                 'topup_PA',
+                                                 'readout_topup'],
+                                   function=get_topup_info),
+                          name='topup_info')
+        
+        wf.connect(datasource, 'bold', topup_info, 'bold')
+        
+        topup = create_topup_workflow(num_slices, task_pe_dir, readout,
+                                      readout_topup, name='topup')
+        
+        wf.connect(preproc, 'outputspec.realigned_files', topup, 'inputspec.realigned_files')
+        wf.connect(preproc, 'outputspec.realigned_files', calc_median, 'in_files')
+        wf.connect(calc_median, 'median_file', topup, 'inputspec.ref_file')
+        wf.connect(topup, 'outputspec.applytopup_corrected', tsnr, 'in_file')
+    else:
+        wf.connect(preproc, "outputspec.realigned_files", tsnr, "in_file")
+
+    wf.connect(tsnr, 'detrended_file', recalc_median, 'in_files')
+
+    # connect to datasink
     """
     Reorder the copes so that now it combines across runs
     """
