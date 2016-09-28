@@ -553,7 +553,7 @@ def get_subjectinfo(subject_id, base_dir, task_id, model_id, session_id=None):
     import os
     import numpy as np
     import re
-    
+
     condition_info = []
     cond_file = os.path.join(base_dir, 'code', 'model', 'model%03d' % model_id,
                                  'condition_key.txt') 
@@ -564,16 +564,15 @@ def get_subjectinfo(subject_id, base_dir, task_id, model_id, session_id=None):
     if len(condition_info) == 0:
         raise ValueError('No condition info found in %s' % cond_file)
     taskinfo = np.array(condition_info)
-    #n_tasks = np.unique(taskinfo[:, 0])
-    n_tasks = []
-    for x in taskinfo[:, 0]:
-        if x not in n_tasks:
-            n_tasks.append(x)
+
+    task_list = list(set(taskinfo[:, 0]))
+    n_tasks = len(task_list)
+
     conds = []
     run_ids = []
-    if task_id > len(n_tasks):
-        raise ValueError('Task id %s does not exist' % task_id)
-    for idx,task in enumerate(n_tasks):
+
+
+    for idx,task in enumerate(task_list):
         taskidx = np.where(taskinfo[:, 0] == '%s'%(task))
         conds.append([condition.replace(' ', '_') for condition
                       in taskinfo[taskidx[0], 2]]) # if 'junk' not in condition])
@@ -588,7 +587,7 @@ def get_subjectinfo(subject_id, base_dir, task_id, model_id, session_id=None):
                                              subject_id,
                                              'func',
                                              '*%s*.nii.gz'%(task))))
-            
+
         try:
             runs = [int(re.search('(?<=run-)\d+',os.path.basename(val)).group(0)) for val in files]
         except AttributeError:
@@ -597,7 +596,7 @@ def get_subjectinfo(subject_id, base_dir, task_id, model_id, session_id=None):
     # TR should be same across runs
     if session_id:
         json_info = glob(os.path.join(base_dir, subject_id, session_id, 
-                                      'func','*%s*.json'%(n_tasks[task_id-1])))[0]
+                                      'func','*%s*.json'%(task)))[0]
     else:    
         json_info = glob(os.path.join(base_dir, subject_id, 'func',
                                      '*%s*.json'%(n_tasks[task_id-1])))[0]
@@ -612,7 +611,7 @@ def get_subjectinfo(subject_id, base_dir, task_id, model_id, session_id=None):
             TR = np.genfromtxt(task_scan_key)[1]
         else:
             TR = np.genfromtxt(os.path.join(base_dir, 'scan_key.txt'))[1]
-    return run_ids[task_id - 1], conds[task_id - 1], TR
+    return run_ids[0], conds[0], TR
 
 
 """
