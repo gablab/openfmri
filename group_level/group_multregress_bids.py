@@ -3,6 +3,30 @@ ROUGH DRAFT
 
 for help:
 contact: annepark@mit.edu
+
+
+Example call:
+
+python /git/gopenfmri/group_level/group_multregress_bids.py \
+-m 124 \
+-t 5 \
+-d /om/project/voice/bids/data/ \
+-l1 /om/project/voice/processedData/l1analysis/l1output_20160901a/ \
+-o /om/project/voice/processedData/groupAnalysis/l2output_20160901a/ \
+-w /om/scratch/Fri/user/group_voice`date +%Y%m%d%H%M%S`/ \
+-p 'SLURM' --plugin_args "{'sbatch_args':'-p om_all_nodes'}" \
+-s /om/project/voice/processedData/openfmri/groups/user/20160904/participant_key.txt \
+-b /om/project/voice/processedData/openfmri/groups/user/20160904/behav.txt \
+-g /om/project/voice/processedData/openfmri/groups/user/20160904/contrasts.txt
+
+## Required files
+#  participant_key.txt
+#  behav.txt
+#  contrasts.txt
+
+## Additional documentation
+https://github.mit.edu/MGHPCC/OpenMind/wiki/Lab-Specific-Cookbook:-Gabrieli-lab#grouplevelscripts
+
 """
 
 import os
@@ -51,11 +75,11 @@ def get_sub_vars(dataset_dir, task_name, model_id, sub_list_file, behav_file, gr
     import numpy as np
     import os
     import pandas as pd
-    import re
-    #sub_list_file = os.path.join(dataset_dir, 'code', 'groups', 'participant_key.txt')
-    #behav_file = os.path.join(dataset_dir, 'code', 'groups', 'behav.txt')
-    #group_contrast_file = os.path.join(dataset_dir, 'code', 'groups', 'contrasts.txt')  
+    import re  
 
+    # Read in all subjects in participant_key ("sub_list_file")
+    # Process only subjects with a nonzero number
+    # Check to make sure every subject to be processed has a line in behav.txt ("behav_file")
     subs_list = pd.read_table(sub_list_file, index_col=0)['task-%s' % task_name]
     subs_needed = subs_list.index[np.nonzero(subs_list)[0]]
     behav_info = pd.read_table(behav_file,  delim_whitespace=True, index_col=0)
