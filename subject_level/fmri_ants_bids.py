@@ -528,7 +528,7 @@ def create_fs_reg_workflow(name='registration'):
 Get info for a given subject
 """
 
-def get_subjectinfo(subject_id, base_dir, task_id, model_id, session_id=None):
+def get_subjectinfo(subject_id, base_dir, task_id, model_id, session_id=None, run_id=None):
     """Get info for a given subject
     Parameters
     ----------
@@ -611,7 +611,15 @@ def get_subjectinfo(subject_id, base_dir, task_id, model_id, session_id=None):
             TR = np.genfromtxt(task_scan_key)[1]
         else:
             TR = np.genfromtxt(os.path.join(base_dir, 'scan_key.txt'))[1]
-    return run_ids[0], conds[0], TR
+            
+    if run_id==None:
+        run_list_process = run_ids[0]
+    else:
+        run_list_process = run_id
+    
+    print '==================================== process run list ======================'
+    print run_list_process
+    return run_list_process, conds[0], TR
 
 
 """
@@ -637,7 +645,8 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
                              task_id=None, output_dir=None, subj_prefix='*',
                              hpcutoff=120., use_derivatives=True,
                              fwhm=6.0, subjects_dir=None, target=None, 
-                             session_id=None):
+                             session_id=None,
+                             run_id=None):
     """Analyzes an open fmri dataset
 
     Parameters
@@ -692,13 +701,14 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
                                 ('task_id', task_id)]
 
     subjinfo = pe.Node(niu.Function(input_names=['subject_id', 'base_dir',
-                                                 'task_id', 'model_id', 'session_id'],
+                                                 'task_id', 'model_id', 'session_id', 'run_id'],
                                     output_names=['run_id', 'conds', 'TR'],
                                     function=get_subjectinfo),
                        name='subjectinfo')
     #subjinfo.inputs.base_dir = None ## update with argumentparse eventually
     subjinfo.inputs.base_dir = data_dir
     subjinfo.inputs.session_id = session_id
+    subjinfo.inputs.run_id = run_id
 
     """
     Get task name (BIDS)
@@ -755,13 +765,13 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
 
         else:
             datasource.inputs.field_template = {'anat': '%s/%s/anat/*T1w.nii.gz',
-                                                'bold': '%s/%s/func/*task-%s_*bold.nii.gz',
+                                                'bold': '%s/%s/func/*task-%s_run-%02d_bold.nii.gz',
                                                 'behav': ('code/model/model%03d/onsets/%s/task%03d_'
                                                           'run%03d/cond*.txt'), 
                                                 'contrasts': ('code/model/model%03d/'
                                                               'task_contrasts.txt')}
             datasource.inputs.template_args = {'anat': [['subject_id', 'session_id']],
-                                           'bold': [['subject_id', 'session_id','task_name']],
+                                           'bold': [['subject_id', 'session_id','task_name', 'run_id']],
                                            'behav': [['model_id', 'subject_id',
                                                       'task_id', 'run_id']],
                                            'contrasts': [['model_id']]}
@@ -1070,7 +1080,9 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
         subs.append(('/model%03d/task%03d_' % (model_id, task_id), '/'))
         subs.append(('_bold_dtype_mcf_bet_thresh_dil', '_mask'))
         subs.append(('mask/model%03d/task%03d/' % (model_id, task_id), 'mask/'))
+        subs.append(('art/model%03d/task%03d/' % (model_id, task_id), 'art/'))
         subs.append(('tsnr/model%03d/task%03d/' % (model_id, task_id), 'tsnr/'))
+        subs.append(('model/model%03d/task%03d/' % (model_id, task_id), 'model/'))
         subs.append(('_output_warped_image', '_anat2target'))
         subs.append(('median_flirt_brain_mask', 'median_brain_mask'))
         subs.append(('median_bbreg_brain_mask', 'median_brain_mask'))
@@ -1188,6 +1200,8 @@ if __name__ == '__main__':
                               "OASIS-30_Atropos_template_in_MNI152_2mm.nii.gz"))
     parser.add_argument("--session_id", dest="session_id", default=None,
                         help="Session id, ses-1")
+    parser.add_argument("--run_id", dest="run_id", default=None,
+                        help="Run id list: 1,2 or 1 or 2")    
     parser.add_argument("--crashdump_dir", dest="crashdump_dir",
                         help="Crashdump dir", default=None)
 
@@ -1216,7 +1230,8 @@ if __name__ == '__main__':
                                   fwhm=args.fwhm,
                                   subjects_dir=args.subjects_dir,
                                   target=args.target_file,
-                                  session_id=args.session_id)
+                                  session_id=args.session_id,
+                                  run_id=[int(i) for i in args.run_id.split(',')])
     #wf.config['execution']['remove_unnecessary_outputs'] = False
     wf.config['execution']['poll_sleep_duration'] = 2
     wf.base_dir = work_dir
