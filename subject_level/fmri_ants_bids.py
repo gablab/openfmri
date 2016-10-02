@@ -1083,6 +1083,7 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
         subs.append(('art/model%03d/task%03d/' % (model_id, task_id), 'art/'))
         subs.append(('tsnr/model%03d/task%03d/' % (model_id, task_id), 'tsnr/'))
         subs.append(('model/model%03d/task%03d/' % (model_id, task_id), 'model/'))
+        subs.append(('motion/model%03d/task%03d/' % (model_id, task_id), 'motion/'))
         subs.append(('_output_warped_image', '_anat2target'))
         subs.append(('median_flirt_brain_mask', 'median_brain_mask'))
         subs.append(('median_bbreg_brain_mask', 'median_brain_mask'))
