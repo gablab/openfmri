@@ -1127,6 +1127,8 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
     wf.connect(art, 'outlier_files', datasink, 'qa.art.@outlier_files')
     wf.connect(registration, 'outputspec.anat2target', datasink, 'qa.anat2target')
     wf.connect(tsnr, 'tsnr_file', datasink, 'qa.tsnr.@map')
+    wf.connect(tsnr, 'stddev_file', datasink, 'qa.tsnr.@stddev')
+    wf.connect(tsnr, 'mean_file', datasink, 'qa.tsnr.@mean')    
     if subjects_dir:
         wf.connect(registration, 'outputspec.min_cost_file', datasink, 'qa.mincost')
         wf.connect([(get_roi_tsnr, datasink, [('avgwf_txt_file', 'qa.tsnr'),
