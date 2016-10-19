@@ -104,7 +104,7 @@ def get_sub_vars(dataset_dir, task_name, model_id, sub_list_file, behav_file, gr
             if val not in behav_info.keys():
                 raise ValueError('Regressor %s not in behav.txt file' % val)
         contrast_name = row.split()[1]
-        contrast_vector = np.array(re.search("\]([\s\d]+)", row).group(1).split()).astype(float).tolist()
+        contrast_vector = np.array(re.search("\]([\s\d.-]+)", row).group(1).split()).astype(float).tolist()
         con = [tuple([contrast_name, 'T', regressor_names, contrast_vector])]
         contrasts.append(con)
 
