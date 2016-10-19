@@ -1138,6 +1138,8 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
                                               ('summary_file', 'copes.roi.@summary')])])
         wf.connect(sampleaparc, 'summary_file', datasink, 'timeseries.aparc.@summary')
         wf.connect(sampleaparc, 'avgwf_txt_file', datasink, 'timeseries.aparc')
+        wf.connect(registration, 'outputspec.out_reg_file', datasink, 'qa.bbregister')
+        
     wf.connect([(splitfunc, datasink,
                  [('copes', 'copes.mni'),
                   ('varcopes', 'varcopes.mni'),
