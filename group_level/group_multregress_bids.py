@@ -71,7 +71,7 @@ def get_taskname(base_dir, task_id):
             if 'task%03d'%(task_id) in info:
                 return info[1]
 
-def get_sub_vars(dataset_dir, task_name, model_id, sub_list_file, behav_file, group_contrast_file):
+def get_sub_vars(task_name, model_id, sub_list_file, behav_file, group_contrast_file):
     import numpy as np
     import os
     import pandas as pd
@@ -145,7 +145,7 @@ def group_multregress_openfmri(dataset_dir, model_id=None, task_id=None, l1outpu
     for task in task_id:
         task_name = get_taskname(dataset_dir, task)
         cope_ids = l1_contrasts_num(model_id, task_name, dataset_dir)
-        regressors_needed, contrasts, groups, subj_list = get_sub_vars(dataset_dir, task_name, model_id,
+        regressors_needed, contrasts, groups, subj_list = get_sub_vars(task_name, model_id,
                                                                       sub_list_file, behav_file, group_contrast_file)
         for idx, contrast in enumerate(contrasts):
             wk = Workflow(name='model_%03d_task_%03d_contrast_%s' % (model_id, task, contrast[0][0]))
