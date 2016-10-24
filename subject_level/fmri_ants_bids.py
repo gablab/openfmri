@@ -1224,7 +1224,13 @@ if __name__ == '__main__':
                           'task%03d' % int(args.task))
     derivatives = args.derivatives
     if derivatives is None:
-       derivatives = False
+        derivatives = False
+        
+    if args.run_id == 'None':
+        args.run_id = None
+    elif args.run_id is not None:
+        args.run_id = [int(i) for i in args.run_id.split(',')]
+        
     wf = analyze_openfmri_dataset(data_dir=os.path.abspath(args.datasetdir),
                                   subject=args.subject,
                                   model_id=int(args.model),
@@ -1237,7 +1243,7 @@ if __name__ == '__main__':
                                   subjects_dir=args.subjects_dir,
                                   target=args.target_file,
                                   session_id=args.session_id,
-                                  run_id=[int(i) for i in args.run_id.split(',')])
+                                  run_id=args.run_id)
     #wf.config['execution']['remove_unnecessary_outputs'] = False
     wf.config['execution']['poll_sleep_duration'] = 2
     wf.base_dir = work_dir
