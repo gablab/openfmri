@@ -646,7 +646,8 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
                              hpcutoff=120., use_derivatives=True,
                              fwhm=6.0, subjects_dir=None, target=None, 
                              session_id=None,
-                             run_id=None):
+                             run_id=None,
+                             ppi_flag=False):
     """Analyzes an open fmri dataset
 
     Parameters
@@ -862,6 +863,76 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
                            name="modelspec")
     modelspec.inputs.input_units = 'secs'
 
+############
+    if ppi_flag:
+        print "setting up all the ppi code"
+        # Ported from K. Sitek mit openfmri, obidssparse branch
+        # subject_id sub-voice854
+        def subtract_1(run_id):
+            run_id_0index = []
+            [run_id_0index.append(run-1) for run in run_id]
+            return run_id_0index
+        sub_1 = pe.Node(niu.Function(input_names=['run_id'],
+                                           output_names=['run_id_0index'],
+                                           function=subtract_1),
+                              name='sub_1')
+        wf.connect(subjinfo, 'run_id', sub_1, 'run_id') # but will it be 1 off? indexed by 0
+
+        datasource_timeseries = pe.Node(nio.DataGrabber(infields=['subject_id', 'run_id',
+                                                   'task_id', 'model_id'],
+                                         outfields=['aparc_timeseries_file']),
+                         name='datasource_timeseries')
+        datasource_timeseries.inputs.base_directory = '/om/project/voice/processedData/l1analysis/l1output_2016102214'
+        datasource_timeseries.inputs.template = '*'
+        datasource_timeseries.inputs.sort_filelist=True
+        datasource_timeseries.inputs.field_template = {'aparc_timeseries_file': ('model%02d/task%03d/%s/timeseries/'
+                                                        'aparc/_aparc_ts%d/aparc+aseg_warped_avgwf.txt')}
+        datasource_timeseries.inputs.template_args = {'aparc_timeseries_file': [['model_id',
+                                                            'task_id','subject_id','run_id']]}
+        wf.connect(infosource, 'subject_id', datasource_timeseries, 'subject_id')
+        wf.connect(infosource, 'model_id', datasource_timeseries, 'model_id')
+        wf.connect(infosource, 'task_id', datasource_timeseries, 'task_id')
+        wf.connect(sub_1, 'run_id_0index', datasource_timeseries, 'run_id') # but will it be 1 off? indexed by 0
+
+        def model_ppi_func(session_info,ppi_aparc_timeseries_file):
+            # Assumes that previous L1 run had three conditions (e.g., emo happy,sad,neutral)
+            # These get summed together to create the single task regressor
+            # The ppi_aparc_timeseries file contains the physiological regressors.  Pick one for the seed region
+            # The column labels for the regions in the aparc+aseg_warped_avgwf.txt file are in the summary.stats file
+            print "model ppi function"
+            print session_info
+
+            import numpy as np
+            from copy import copy
+            session_info_ppi = copy(session_info)
+            for idx,info in enumerate(session_info):
+                conds = np.zeros((len(info['regress'][0]['val']),3))
+                for c in range(3):
+                    conds[:,c]=np.array(info['regress'][c]['val'])
+                regress_task_raw = np.sum(conds,1) # 3 conditions in this task
+                regress_task = regress_task_raw/np.max(regress_task_raw) # rescaled to 0:1
+
+                ppi_aparc_timeseries = np.genfromtxt(ppi_aparc_timeseries_file[idx])
+                ppi_timeseries = ppi_aparc_timeseries[:,14] # 14= right amygdala roi_list.index('ctx-lh-medialorbitofrontal')
+                regress_phys = ppi_timeseries
+
+                regress_interact = regress_task * regress_phys
+
+                session_info_ppi[idx]['regress'][0]['val'] = regress_task
+                session_info_ppi[idx]['regress'][1]['val'] = regress_phys
+                session_info_ppi[idx]['regress'][2]['val'] = regress_interact
+
+            return session_info_ppi
+
+        model_ppi = pe.Node(niu.Function(input_names=['session_info','ppi_aparc_timeseries_file'],
+                                           output_names=['session_info_ppi'],
+                                           function=model_ppi_func),
+                              name='model_ppi')
+        wf.connect(datasource_timeseries, 'aparc_timeseries_file', model_ppi, 'ppi_aparc_timeseries_file')
+    else:
+        print "not setting up ppi code
+
+############
     def check_behav_list(behav, run_id, conds):
         import six
         import numpy as np
@@ -892,21 +963,46 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
     wf.connect(taskname, 'task_name', contrastgen, 'task_name')
     wf.connect(contrastgen, 'contrasts', modelfit, 'inputspec.contrasts')
 
-    wf.connect([(preproc, art, [('outputspec.motion_parameters',
-                                 'realignment_parameters'),
-                                ('outputspec.realigned_files',
-                                 'realigned_files'),
-                                ('outputspec.mask', 'mask_file')]),
-                (preproc, modelspec, [('outputspec.highpassed_files',
-                                       'functional_runs'),
-                                      ('outputspec.motion_parameters',
-                                       'realignment_parameters')]),
-                (art, modelspec, [('outlier_files', 'outlier_files')]),
-                (modelspec, modelfit, [('session_info',
-                                        'inputspec.session_info')]),
-                (preproc, modelfit, [('outputspec.highpassed_files',
-                                      'inputspec.functional_data')])
-                ])
+    if ppi_flag:
+        print "Connecting ppi blocks"
+        wf.connect([(preproc, art, [('outputspec.motion_parameters',
+                                     'realignment_parameters'),
+                                    ('outputspec.realigned_files',
+                                     'realigned_files'),
+                                    ('outputspec.mask', 'mask_file')]),
+                    (preproc, modelspec, [('outputspec.highpassed_files',
+                                           'functional_runs'),
+                                          ('outputspec.motion_parameters',
+                                           'realignment_parameters')]),
+                    (art, modelspec, [('outlier_files', 'outlier_files')]),
+                    (modelspec, model_ppi, [('session_info',
+                                            'session_info')]),
+                    (model_ppi, modelfit, [('session_info_ppi',
+                                            'inputspec.session_info')]),
+                    (preproc, modelfit, [('outputspec.highpassed_files',
+                                          'inputspec.functional_data')])
+                    ])
+
+    else:
+        print "Not connecting ppi nodes"
+        wf.connect([(preproc, art, [('outputspec.motion_parameters',
+                                     'realignment_parameters'),
+                                    ('outputspec.realigned_files',
+                                     'realigned_files'),
+                                    ('outputspec.mask', 'mask_file')]),
+                    (preproc, modelspec, [('outputspec.highpassed_files',
+                                           'functional_runs'),
+                                          ('outputspec.motion_parameters',
+                                           'realignment_parameters')]),
+                    (art, modelspec, [('outlier_files', 'outlier_files')]),
+                    (modelspec, modelfit, [('session_info',
+                                            'inputspec.session_info')]),
+                    (preproc, modelfit, [('outputspec.highpassed_files',
+                                          'inputspec.functional_data')])
+                    ])
+
+
+
 
     # Comute TSNR on realigned data regressing polynomials upto order 2
     tsnr = MapNode(TSNR(regress_poly=2), iterfield=['in_file'], name='tsnr')
@@ -1210,6 +1306,8 @@ if __name__ == '__main__':
                         help="Run id list: 1,2 or 1 or 2")    
     parser.add_argument("--crashdump_dir", dest="crashdump_dir",
                         help="Crashdump dir", default=None)
+    parser.add_argument("--ppi_flag", dest="ppi_flag",
+                        help="Perform ppi for voice project", default=False)
 
     args = parser.parse_args()
     outdir = args.outdir
@@ -1243,7 +1341,8 @@ if __name__ == '__main__':
                                   subjects_dir=args.subjects_dir,
                                   target=args.target_file,
                                   session_id=args.session_id,
-                                  run_id=args.run_id)
+                                  run_id=args.run_id,
+                                  ppi_flag=args.ppi_flag)
     #wf.config['execution']['remove_unnecessary_outputs'] = False
     wf.config['execution']['poll_sleep_duration'] = 2
     wf.base_dir = work_dir
