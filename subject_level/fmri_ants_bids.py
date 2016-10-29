@@ -873,7 +873,7 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
     modelspec.inputs.input_units = 'secs'
 
 ############
-    if ppi_flag:
+    if ppi_flag and sparse_flag:
         print "setting up all the ppi code"
         # Ported from K. Sitek mit openfmri, obidssparse branch
         # subject_id sub-voice854
@@ -891,7 +891,7 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
                                                    'task_id', 'model_id'],
                                          outfields=['aparc_timeseries_file']),
                          name='datasource_timeseries')
-        datasource_timeseries.inputs.base_directory = '/om/project/voice/processedData/l1analysis/l1output_2016102214'
+        datasource_timeseries.inputs.base_directory = '/om/project/voice/processedData/l1analysis/l1output_2016102908'
         datasource_timeseries.inputs.template = '*'
         datasource_timeseries.inputs.sort_filelist=True
         datasource_timeseries.inputs.field_template = {'aparc_timeseries_file': ('model%02d/task%03d/%s/timeseries/'
@@ -919,11 +919,11 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
                 for c in range(3):
                     conds[:,c]=np.array(info['regress'][c]['val'])
                 regress_task_raw = np.sum(conds,1) # 3 conditions in this task
-                regress_task = regress_task_raw/np.max(regress_task_raw) # rescaled to 0:1
+                regress_task = regress_task_raw/np.max(np.abs(regress_task_raw)) # rescaled to 0:1
 
                 ppi_aparc_timeseries = np.genfromtxt(ppi_aparc_timeseries_file[idx])
                 ppi_timeseries = ppi_aparc_timeseries[:,14] # 14= right amygdala roi_list.index('ctx-lh-medialorbitofrontal')
-                regress_phys = ppi_timeseries
+                regress_phys = ppi_timeseries/np.max(np.abs(ppi_timeseries))
 
                 regress_interact = regress_task * regress_phys
 
@@ -938,6 +938,8 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
                                            function=model_ppi_func),
                               name='model_ppi')
         wf.connect(datasource_timeseries, 'aparc_timeseries_file', model_ppi, 'ppi_aparc_timeseries_file')
+    elif ppi_flag and not sparse_flag:
+        print "PPI code requires session_info format as returned by SpecifySparseModel
     else:
         print "not setting up ppi code
 
