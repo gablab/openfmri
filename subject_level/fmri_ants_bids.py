@@ -605,6 +605,8 @@ def get_subjectinfo(subject_id, base_dir, task_id, model_id, session_id=None, ru
         with open(json_info, 'rt') as fp:
             data = json.load(fp)
             TR = data['RepetitionTime']
+            delay = data['global']['const']['CsaSeries.MrPhoenixProtocol.lDelayTimeInTR']/1000000.
+            TA = TR - delay  
     else:
         task_scan_key = os.path.join(base_dir, 'code', 'scan_key.txt')
         if os.path.exists(task_scan_key):
@@ -619,7 +621,7 @@ def get_subjectinfo(subject_id, base_dir, task_id, model_id, session_id=None, ru
     
     print '==================================== process run list ======================'
     print run_list_process
-    return run_list_process, conds[0], TR
+    return run_list_process, conds[0], TR, TA
 
 
 """
@@ -646,8 +648,9 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
                              hpcutoff=120., use_derivatives=True,
                              fwhm=6.0, subjects_dir=None, target=None, 
                              session_id=None,
-                             run_id=None,
-                             ppi_flag=False):
+                             ppi_flag=False,
+                             sparse_flag=False):
+
     """Analyzes an open fmri dataset
 
     Parameters
@@ -703,7 +706,7 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
 
     subjinfo = pe.Node(niu.Function(input_names=['subject_id', 'base_dir',
                                                  'task_id', 'model_id', 'session_id', 'run_id'],
-                                    output_names=['run_id', 'conds', 'TR'],
+                                    output_names=['run_id', 'conds', 'TR', 'TA'],
                                     function=get_subjectinfo),
                        name='subjectinfo')
     #subjinfo.inputs.base_dir = None ## update with argumentparse eventually
@@ -858,9 +861,15 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
                      iterfield=['realigned_files', 'realignment_parameters',
                                 'mask_file'],
                      name="art")
+    if sparse_flag:
+        modelspec = pe.Node(interface=model.SpecifySparseModel(),
+                            name="modelspec")
+        modelspec.inputs.stimuli_as_impulses=False #GAC, added but not sure if this is relevant
+        modelspec.inputs.model_hrf=True # GAC added 2/8/2015
+    else:
+        modelspec = pe.Node(interface=model.SpecifyModel(),
+                               name="modelspec")
 
-    modelspec = pe.Node(interface=model.SpecifyModel(),
-                           name="modelspec")
     modelspec.inputs.input_units = 'secs'
 
 ############
@@ -949,6 +958,8 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
                           name='reshape_behav')
 
     wf.connect(subjinfo, 'TR', modelspec, 'time_repetition')
+    if sparse_flag:
+        wf.connect(subjinfo, 'TA', modelspec, 'time_acquisition')
     wf.connect(datasource, 'behav', reshape_behav, 'behav')
     wf.connect(subjinfo, 'run_id', reshape_behav, 'run_id')
     wf.connect(subjinfo, 'conds', reshape_behav, 'conds')
@@ -1304,6 +1315,8 @@ if __name__ == '__main__':
                         help="Session id, ses-1")
     parser.add_argument("--run_id", dest="run_id", default=None,
                         help="Run id list: 1,2 or 1 or 2")    
+    parser.add_argument("--sparse_flag", dest="sparse_flag", default=False,
+                        help="Default False, use nipype.algorithms.modelgen.SpecifyModel.  If True, use SpecifySparseModel instead.") 
     parser.add_argument("--crashdump_dir", dest="crashdump_dir",
                         help="Crashdump dir", default=None)
     parser.add_argument("--ppi_flag", dest="ppi_flag",
@@ -1342,7 +1355,9 @@ if __name__ == '__main__':
                                   target=args.target_file,
                                   session_id=args.session_id,
                                   run_id=args.run_id,
-                                  ppi_flag=args.ppi_flag)
+                                  ppi_flag=args.ppi_flag,
+                                  sparse_flag=args.sparse_flag)
+
     #wf.config['execution']['remove_unnecessary_outputs'] = False
     wf.config['execution']['poll_sleep_duration'] = 2
     wf.base_dir = work_dir
