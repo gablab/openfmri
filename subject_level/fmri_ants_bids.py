@@ -648,6 +648,7 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
                              hpcutoff=120., use_derivatives=True,
                              fwhm=6.0, subjects_dir=None, target=None, 
                              session_id=None,
+                             run_id=None,
                              ppi_flag=False,
                              sparse_flag=False):
 
@@ -862,6 +863,7 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
                                 'mask_file'],
                      name="art")
     if sparse_flag:
+        print "Using sparse model"
         modelspec = pe.Node(interface=model.SpecifySparseModel(),
                             name="modelspec")
         modelspec.inputs.stimuli_as_impulses=False #GAC, added but not sure if this is relevant
@@ -939,9 +941,9 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
                               name='model_ppi')
         wf.connect(datasource_timeseries, 'aparc_timeseries_file', model_ppi, 'ppi_aparc_timeseries_file')
     elif ppi_flag and not sparse_flag:
-        print "PPI code requires session_info format as returned by SpecifySparseModel
+        print "PPI code requires session_info format as returned by SpecifySparseModel"
     else:
-        print "not setting up ppi code
+        print "not setting up ppi code"
 
 ############
     def check_behav_list(behav, run_id, conds):
@@ -1245,8 +1247,9 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
                                               ('summary_file', 'qa.tsnr.@summary')])])
         wf.connect([(get_roi_mean, datasink, [('avgwf_txt_file', 'copes.roi'),
                                               ('summary_file', 'copes.roi.@summary')])])
-        wf.connect(sampleaparc, 'summary_file', datasink, 'timeseries.aparc.@summary')
-        wf.connect(sampleaparc, 'avgwf_txt_file', datasink, 'timeseries.aparc')
+        if ppi_flag:
+            wf.connect(sampleaparc, 'summary_file', datasink, 'timeseries.aparc.@summary')
+            wf.connect(sampleaparc, 'avgwf_txt_file', datasink, 'timeseries.aparc')
         wf.connect(registration, 'outputspec.out_reg_file', datasink, 'qa.bbregister')
         
     wf.connect([(splitfunc, datasink,
@@ -1343,6 +1346,18 @@ if __name__ == '__main__':
         args.run_id = None
     elif args.run_id is not None:
         args.run_id = [int(i) for i in args.run_id.split(',')]
+
+    if args.sparse_flag:
+        if args.sparse_flag=='True':
+            sparse_flag = True
+        else:
+            sparse_flag = False
+    if args.ppi_flag:
+        if args.ppi_flag=='True':
+            ppi_flag = True
+        else:
+            ppi_flag = False    
+
         
     wf = analyze_openfmri_dataset(data_dir=os.path.abspath(args.datasetdir),
                                   subject=args.subject,
@@ -1357,8 +1372,8 @@ if __name__ == '__main__':
                                   target=args.target_file,
                                   session_id=args.session_id,
                                   run_id=args.run_id,
-                                  ppi_flag=args.ppi_flag,
-                                  sparse_flag=args.sparse_flag)
+                                  ppi_flag=ppi_flag,
+                                  sparse_flag=sparse_flag)
 
     #wf.config['execution']['remove_unnecessary_outputs'] = False
     wf.config['execution']['poll_sleep_duration'] = 2
