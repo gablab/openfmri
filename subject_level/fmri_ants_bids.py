@@ -649,8 +649,10 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
                              fwhm=6.0, subjects_dir=None, target=None, 
                              session_id=None,
                              run_id=None,
-                             ppi_flag=False,
-                             sparse_flag=False):
+                             sparse_flag=False,
+                             ppi_flag=False,                            
+                             ppi_roi=None,
+                             ppi_base_directory=None):
 
     """Analyzes an open fmri dataset
 
@@ -893,7 +895,7 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
                                                    'task_id', 'model_id'],
                                          outfields=['aparc_timeseries_file']),
                          name='datasource_timeseries')
-        datasource_timeseries.inputs.base_directory = '/om/project/voice/processedData/l1analysis/l1output_2016102908'
+        datasource_timeseries.inputs.base_directory = ppi_base_directory
         datasource_timeseries.inputs.template = '*'
         datasource_timeseries.inputs.sort_filelist=True
         datasource_timeseries.inputs.field_template = {'aparc_timeseries_file': ('model%02d/task%03d/%s/timeseries/'
@@ -905,18 +907,33 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
         wf.connect(infosource, 'task_id', datasource_timeseries, 'task_id')
         wf.connect(sub_1, 'run_id_0index', datasource_timeseries, 'run_id') # but will it be 1 off? indexed by 0
 
-        def model_ppi_func(session_info,ppi_aparc_timeseries_file):
+        def model_ppi_func(session_info,ppi_aparc_timeseries_file, ppi_roi, ppi_base_directory):
             # Assumes that previous L1 run had three conditions (e.g., emo happy,sad,neutral)
             # These get summed together to create the single task regressor
             # The ppi_aparc_timeseries file contains the physiological regressors.  Pick one for the seed region
             # The column labels for the regions in the aparc+aseg_warped_avgwf.txt file are in the summary.stats file
+            # ppi_roi (string) 'ctx-lh-medialorbitofrontal'.  Seed region.
+            # ppi_base_directory (string) path to L1 analysis from which seed waveforms will be pulled
+
             print "model ppi function"
             print session_info
 
             import numpy as np
             from copy import copy
+            import pandas as pd
+            import os
+
             session_info_ppi = copy(session_info)
             for idx,info in enumerate(session_info):
+
+                # Read in lookup table to map string roi to index in waveform table
+                # Assumes that the lookup table is the same for all the aparc timeseries
+                df = pd.read_csv(os.path.join(os.path.split(ppi_aparc_timeseries_file[idx])[0], 
+                                              'summary.stats'), skiprows=52, delim_whitespace=True)
+                df_clean = df.iloc[:,:-2]
+                df_clean.columns = df.columns[2:] # Fix headers
+                ppi_idx_roi = df_clean[df_clean['StructName']==ppi_roi].index[0]
+
                 conds = np.zeros((len(info['regress'][0]['val']),3))
                 for c in range(3):
                     conds[:,c]=np.array(info['regress'][c]['val'])
@@ -924,7 +941,7 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
                 regress_task = regress_task_raw/np.max(np.abs(regress_task_raw)) # rescaled to 0:1
 
                 ppi_aparc_timeseries = np.genfromtxt(ppi_aparc_timeseries_file[idx])
-                ppi_timeseries = ppi_aparc_timeseries[:,14] # 14= right amygdala roi_list.index('ctx-lh-medialorbitofrontal')
+                ppi_timeseries = ppi_aparc_timeseries[:,ppi_idx_roi] # 14= right amygdala roi_list.index('ctx-lh-medialorbitofrontal')
                 regress_phys = ppi_timeseries/np.max(np.abs(ppi_timeseries))
 
                 regress_interact = regress_task * regress_phys
@@ -935,15 +952,18 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
 
             return session_info_ppi
 
-        model_ppi = pe.Node(niu.Function(input_names=['session_info','ppi_aparc_timeseries_file'],
-                                           output_names=['session_info_ppi'],
-                                           function=model_ppi_func),
-                              name='model_ppi')
+        model_ppi = pe.Node(niu.Function(input_names=['session_info','ppi_aparc_timeseries_file',
+                                                      'ppi_roi', 'ppi_base_directory'],
+                                         output_names=['session_info_ppi'],
+                                         function=model_ppi_func),
+                                         name='model_ppi')
+        model_ppi.inputs.ppi_roi = ppi_roi
+        model_ppi.inputs.ppi_base_directory = ppi_base_directory
         wf.connect(datasource_timeseries, 'aparc_timeseries_file', model_ppi, 'ppi_aparc_timeseries_file')
     elif ppi_flag and not sparse_flag:
         print "PPI code requires session_info format as returned by SpecifySparseModel"
     else:
-        print "not setting up ppi code"
+        print "Not setting up PPI code"
 
 ############
     def check_behav_list(behav, run_id, conds):
@@ -1247,9 +1267,8 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
                                               ('summary_file', 'qa.tsnr.@summary')])])
         wf.connect([(get_roi_mean, datasink, [('avgwf_txt_file', 'copes.roi'),
                                               ('summary_file', 'copes.roi.@summary')])])
-        if ppi_flag:
-            wf.connect(sampleaparc, 'summary_file', datasink, 'timeseries.aparc.@summary')
-            wf.connect(sampleaparc, 'avgwf_txt_file', datasink, 'timeseries.aparc')
+        wf.connect(sampleaparc, 'summary_file', datasink, 'timeseries.aparc.@summary')
+        wf.connect(sampleaparc, 'avgwf_txt_file', datasink, 'timeseries.aparc')
         wf.connect(registration, 'outputspec.out_reg_file', datasink, 'qa.bbregister')
         
     wf.connect([(splitfunc, datasink,
@@ -1326,6 +1345,11 @@ if __name__ == '__main__':
                         help="Crashdump dir", default=None)
     parser.add_argument("--ppi_flag", dest="ppi_flag",
                         help="Perform ppi for voice project", default=False)
+    parser.add_argument("--ppi_roi", dest="ppi_roi",
+                        help="PPI roi seed region string from summary.txt\n Right-Thalamus-Proper", default=None)
+    parser.add_argument("--ppi_base_directory", dest="ppi_base_directory",
+                        help="L1 analysis base directory from which seed waveform will be taken for PPI\n" \
+                             +  "/om/project/voice/processedData/l1analysis/l1output_2016102908", default=None)
 
     args = parser.parse_args()
     outdir = args.outdir
@@ -1372,8 +1396,10 @@ if __name__ == '__main__':
                                   target=args.target_file,
                                   session_id=args.session_id,
                                   run_id=args.run_id,
+                                  sparse_flag=sparse_flag,
                                   ppi_flag=ppi_flag,
-                                  sparse_flag=sparse_flag)
+                                  ppi_roi=args.ppi_roi,
+                                  ppi_base_directory=args.ppi_base_directory)
 
     #wf.config['execution']['remove_unnecessary_outputs'] = False
     wf.config['execution']['poll_sleep_duration'] = 2
