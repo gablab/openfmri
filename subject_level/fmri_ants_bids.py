@@ -1290,7 +1290,12 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
     preproc.inputs.inputspec.fwhm = fwhm
     gethighpass.inputs.hpcutoff = hpcutoff
     modelspec.inputs.high_pass_filter_cutoff = hpcutoff
-    modelfit.inputs.inputspec.bases = {'dgamma': {'derivs': use_derivatives}}
+    if sparse_flag:
+        print("Setting modelfit.inputs.inputspec.bases to None.")
+        modelfit.inputs.inputspec.bases = {'none': None}
+    else:
+        print("Setting modelfit.inputs.inputspec.bases to dgamma.")
+        modelfit.inputs.inputspec.bases = {'dgamma': {'derivs': use_derivatives}}
     modelfit.inputs.inputspec.model_serial_correlations = True
     modelfit.inputs.inputspec.film_threshold = 1000
 
