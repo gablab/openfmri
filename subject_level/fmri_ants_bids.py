@@ -1280,6 +1280,8 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
     wf.connect(registration, 'outputspec.transformed_mean', datasink, 'mean.mni')
     wf.connect(registration, 'outputspec.func2anat_transform', datasink, 'xfm.mean2anat')
     wf.connect(registration, 'outputspec.anat2target_transform', datasink, 'xfm.anat2target')
+    wf.connect(preproc, 'outputspec.highpassed_files', datasink, 'qa.highpass')
+    wf.connect(preproc, 'outputspec.realigned_files', datasink, 'qa.realigned')
 
     """
     Set processing parameters
