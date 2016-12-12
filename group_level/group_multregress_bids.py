@@ -31,7 +31,7 @@ https://github.mit.edu/MGHPCC/OpenMind/wiki/Lab-Specific-Cookbook:-Gabrieli-lab#
 
 import os
 from nipype import config
-config.enable_provenance()
+#config.enable_provenance()
 
 from nipype import Workflow, Node, MapNode, Function
 from nipype import DataGrabber, DataSink
@@ -127,7 +127,7 @@ def run_palm(cope_file, design_file, contrast_file, group_file, mask_file,
     from glob import glob
     from nipype.interfaces.base import CommandLine
     cmd = ("palm -i {cope_file} -m {mask_file} -d {design_file} -t {contrast_file} -eb {group_file} -T " 
-           "-C {cluster_threshold} -Cstat extent -fdr -noniiclass -twotail -logp -zstat")
+           "-C {cluster_threshold} -Cstat extent -fdr -noniiclass -twotail -logp -zstat -n 10000")
     cl = CommandLine(cmd.format(cope_file=cope_file, mask_file=mask_file, design_file=design_file, 
                                 contrast_file=contrast_file,
                                 group_file=group_file, cluster_threshold=cluster_threshold))
@@ -176,8 +176,8 @@ def group_multregress_openfmri(dataset_dir, model_id=None, task_id=None, l1outpu
             wk.connect(info, 'model_id', dg, 'model_id')
             wk.connect(info, 'task_id', dg, 'task_id')
 
-            print '------------'
-            print dg
+            print('------------')
+            print(dg)
             
             model = Node(MultipleRegressDesign(), name='l2model')
             model.inputs.groups = groups
@@ -343,7 +343,7 @@ if __name__ == '__main__':
                                     behav_file=args.behav_file, 
                                     group_contrast_file=args.group_contrast_file)
     wf.config['execution']['poll_sleep_duration'] = args.sleep
-    
+    wf.config['execution']['job_finished_timeout'] = 5
     if not (args.crashdump_dir is None):
         wf.config['execution']['crashdump_dir'] = args.crashdump_dir    
 

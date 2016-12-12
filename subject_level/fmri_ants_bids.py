@@ -13,7 +13,7 @@ This script demonstrates how to use nipype to analyze a data set::
 """
 
 from nipype import config
-config.enable_provenance()
+#config.enable_provenance()
 
 import six
 
@@ -25,7 +25,7 @@ import nipype.algorithms.modelgen as model
 import nipype.algorithms.rapidart as ra
 import nipype.interfaces.fsl as fsl
 import nipype.interfaces.ants as ants
-from nipype.algorithms.misc import TSNR
+from nipype.algorithms.confounds import TSNR
 from nipype.interfaces.c3 import C3dAffineTool
 import nipype.interfaces.io as nio
 import nipype.interfaces.utility as niu
@@ -619,8 +619,8 @@ def get_subjectinfo(subject_id, base_dir, task_id, model_id, session_id=None, ru
     else:
         run_list_process = run_id
     
-    print '==================================== process run list ======================'
-    print run_list_process
+    print('==================================== process run list ======================')
+    print(run_list_process)
     return run_list_process, conds[0], TR, TA
 
 
@@ -865,7 +865,7 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
                                 'mask_file'],
                      name="art")
     if sparse_flag:
-        print "Using sparse model"
+        print("Using sparse model")
         modelspec = pe.Node(interface=model.SpecifySparseModel(),
                             name="modelspec")
         modelspec.inputs.stimuli_as_impulses=False #GAC, added but not sure if this is relevant
@@ -878,7 +878,7 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
 
 ############
     if ppi_flag and sparse_flag:
-        print "setting up all the ppi code"
+        print("setting up all the ppi code")
         # Ported from K. Sitek mit openfmri, obidssparse branch
         # subject_id sub-voice854
         def subtract_1(run_id):
@@ -915,8 +915,8 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
             # ppi_roi (string) 'ctx-lh-medialorbitofrontal'.  Seed region.
             # ppi_base_directory (string) path to L1 analysis from which seed waveforms will be pulled
 
-            print "model ppi function"
-            print session_info
+            print("model ppi function")
+            print(session_info)
 
             import numpy as np
             from copy import copy
@@ -961,9 +961,9 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
         model_ppi.inputs.ppi_base_directory = ppi_base_directory
         wf.connect(datasource_timeseries, 'aparc_timeseries_file', model_ppi, 'ppi_aparc_timeseries_file')
     elif ppi_flag and not sparse_flag:
-        print "PPI code requires session_info format as returned by SpecifySparseModel"
+        print("PPI code requires session_info format as returned by SpecifySparseModel")
     else:
-        print "Not setting up PPI code"
+        print("Not setting up PPI code")
 
 ############
     def check_behav_list(behav, run_id, conds):
@@ -999,7 +999,7 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
     wf.connect(contrastgen, 'contrasts', modelfit, 'inputspec.contrasts')
 
     if ppi_flag:
-        print "Connecting ppi blocks"
+        print("Connecting ppi blocks")
         wf.connect([(preproc, art, [('outputspec.motion_parameters',
                                      'realignment_parameters'),
                                     ('outputspec.realigned_files',
@@ -1019,7 +1019,7 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
                     ])
 
     else:
-        print "Not connecting ppi nodes"
+        print("Not connecting ppi nodes")
         wf.connect([(preproc, art, [('outputspec.motion_parameters',
                                      'realignment_parameters'),
                                     ('outputspec.realigned_files',
