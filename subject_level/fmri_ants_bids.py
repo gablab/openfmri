@@ -236,7 +236,9 @@ def create_reg_workflow(name='registration'):
     Concatenate the affine and ants transforms into a list
     """
 
-    pickfirst = lambda x: x[0]
+    #pickfirst = lambda x: x[0]
+    pickfirst = lambda x: x[0] if isinstance(x, (list, tuple)) else x
+	
 
     merge = pe.Node(niu.Merge(2), iterfield=['in2'], name='mergexfm')
     register.connect(convert2itk, 'itk_transform', merge, 'in2')
@@ -453,7 +455,9 @@ def create_fs_reg_workflow(name='registration'):
     Concatenate the affine and ants transforms into a list
     """
 
-    pickfirst = lambda x: x[0]
+    #pickfirst = lambda x: x[0]
+    pickfirst = lambda x: x[0] if isinstance(x, (list, tuple)) else x
+	
 
     merge = Node(Merge(2), iterfield=['in2'], name='mergexfm')
     register.connect(convert2itk, 'itk_transform', merge, 'in2')
