@@ -237,7 +237,7 @@ def create_reg_workflow(name='registration'):
     """
 
     #pickfirst = lambda x: x[0]
-     pickfirst = lambda x: x[0] if isinstance(x, (list, tuple)) else x
+    pickfirst = lambda x: x[0] if isinstance(x, (list, tuple)) else x
 	
 
     merge = pe.Node(niu.Merge(2), iterfield=['in2'], name='mergexfm')
@@ -456,7 +456,7 @@ def create_fs_reg_workflow(name='registration'):
     """
 
     #pickfirst = lambda x: x[0]
-     pickfirst = lambda x: x[0] if isinstance(x, (list, tuple)) else x
+    pickfirst = lambda x: x[0] if isinstance(x, (list, tuple)) else x
 	
 
     merge = Node(Merge(2), iterfield=['in2'], name='mergexfm')
