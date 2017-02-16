@@ -974,7 +974,7 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
             behav = [behav]
         behav_array = np.array(behav).flatten()
         num_elements = behav_array.shape[0]
-        return behav_array.reshape(num_elements/num_conds, num_conds).tolist()
+        return behav_array.reshape(int(num_elements/num_conds), num_conds).tolist()
 
     reshape_behav = pe.Node(niu.Function(input_names=['behav', 'run_id', 'conds'],
                                        output_names=['behav'],
@@ -1066,8 +1066,8 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
         n_runs = len(copes)
         all_copes = np.array(copes).flatten()
         all_varcopes = np.array(varcopes).flatten()
-        outcopes = all_copes.reshape(len(all_copes)/num_copes, num_copes).T.tolist()
-        outvarcopes = all_varcopes.reshape(len(all_varcopes)/num_copes, num_copes).T.tolist()
+        outcopes = all_copes.reshape(int(len(all_copes)/num_copes), num_copes).T.tolist()
+        outvarcopes = all_varcopes.reshape(int(len(all_varcopes)/num_copes), num_copes).T.tolist()
         return outcopes, outvarcopes, n_runs
 
     cope_sorter = pe.Node(niu.Function(input_names=['copes', 'varcopes',
