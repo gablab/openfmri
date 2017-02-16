@@ -1293,7 +1293,7 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
     modelspec.inputs.high_pass_filter_cutoff = hpcutoff
     if sparse_flag:
         print("Setting modelfit.inputs.inputspec.bases to None.")
-        modelfit.inputs.inputspec.bases = {'none': None}
+        modelfit.inputs.inputspec.bases = {'none': {'none': None}}
     else:
         print("Setting modelfit.inputs.inputspec.bases to dgamma.")
         modelfit.inputs.inputspec.bases = {'dgamma': {'derivs': use_derivatives}}
