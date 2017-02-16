@@ -969,12 +969,13 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
     def check_behav_list(behav, run_id, conds):
         import six
         import numpy as np
+       
         num_conds = len(conds)
         if isinstance(behav, six.string_types):
             behav = [behav]
         behav_array = np.array(behav).flatten()
         num_elements = behav_array.shape[0]
-        return behav_array.reshape(num_elements/num_conds, num_conds).tolist()
+        return behav_array.reshape(int(num_elements/num_conds), num_conds).tolist()
 
     reshape_behav = pe.Node(niu.Function(input_names=['behav', 'run_id', 'conds'],
                                        output_names=['behav'],
@@ -1066,8 +1067,8 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
         n_runs = len(copes)
         all_copes = np.array(copes).flatten()
         all_varcopes = np.array(varcopes).flatten()
-        outcopes = all_copes.reshape(len(all_copes)/num_copes, num_copes).T.tolist()
-        outvarcopes = all_varcopes.reshape(len(all_varcopes)/num_copes, num_copes).T.tolist()
+        outcopes = all_copes.reshape(int(len(all_copes)/num_copes), num_copes).T.tolist()
+        outvarcopes = all_varcopes.reshape(int(len(all_varcopes)/num_copes), num_copes).T.tolist()
         return outcopes, outvarcopes, n_runs
 
     cope_sorter = pe.Node(niu.Function(input_names=['copes', 'varcopes',
@@ -1127,6 +1128,15 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
                                   ('zstats', 'zstats'),
                                   ])])
     wf.connect(mergefunc, 'out_files', registration, 'inputspec.source_files')
+    
+    reg_func_flag = False
+    if reg_func_flag:  
+        #Transform the realigned, hpf functionanl data from preproc into MNI152 space
+        registration_func=registration.clone(name='registration_func')
+        wf.connect(calc_median, 'median_file', registration_func, 'inputspec.mean_image')        
+        wf.connect(infosource, 'subject_id', registration_func, 'inputspec.subject_id')      
+        wf.connect(preproc, 'outputspec.highpassed_files', registration_func, 
+                                              'inputspec.source_files')
 
     def split_files(in_files, splits):
         copes = in_files[:splits[0]]
@@ -1283,7 +1293,8 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
     wf.connect(registration, 'outputspec.anat2target_transform', datasink, 'xfm.anat2target')
     wf.connect(preproc, 'outputspec.highpassed_files', datasink, 'qa.highpass')
     wf.connect(preproc, 'outputspec.realigned_files', datasink, 'qa.realigned')
-
+    #wf.connect(registration_func, 'outputspec.transformed_files', datasink, 'xfm_func')
+    
     """
     Set processing parameters
     """
@@ -1293,7 +1304,7 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
     modelspec.inputs.high_pass_filter_cutoff = hpcutoff
     if sparse_flag:
         print("Setting modelfit.inputs.inputspec.bases to None.")
-        modelfit.inputs.inputspec.bases = {'none': None}
+        modelfit.inputs.inputspec.bases = {'none': {'none': None}}
     else:
         print("Setting modelfit.inputs.inputspec.bases to dgamma.")
         modelfit.inputs.inputspec.bases = {'dgamma': {'derivs': use_derivatives}}
@@ -1410,7 +1421,9 @@ if __name__ == '__main__':
                                   ppi_base_directory=args.ppi_base_directory)
 
     #wf.config['execution']['remove_unnecessary_outputs'] = False
-    wf.config['execution']['poll_sleep_duration'] = 2
+    wf.config['execution']['poll_sleep_duration'] = 20 #args.sleep
+    wf.config['execution']['job_finished_timeout'] = 60
+    
     wf.base_dir = work_dir
     
     if not (args.crashdump_dir is None):
@@ -1419,8 +1432,9 @@ if __name__ == '__main__':
     if args.plugin_args:
         wf.run(args.plugin, plugin_args=eval(args.plugin_args))
     else:
-        #wf.run('SLURM', plugin_args={'sbatch_args': '-p om_interactive -N1 -c1','max_jobs':40}) 
-        wf.run(args.plugin)
+        print('-- no sbatch args --')
+        wf.run('SLURM', plugin_args={'sbatch_args': '-N1 -c1','max_jobs':10}) 
+        #wf.run(args.plugin)
 
 
 
