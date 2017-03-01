@@ -33,6 +33,8 @@ from nipype.workflows.fmri.fsl import (create_featreg_preproc,
                                        create_modelfit_workflow,
                                        create_fixed_effects_flow)
 
+from nipype.workflows.fmri.fsl import create_featreg_preproc_smooth # GAC
+
 from nipype import LooseVersion
 from nipype import Workflow, Node, MapNode
 from nipype.interfaces import (fsl, Function, ants, freesurfer)
@@ -670,7 +672,9 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
     Load nipype workflows
     """
 
-    preproc = create_featreg_preproc(whichvol='first')
+    #preproc = create_featreg_preproc(whichvol='first') # GAC
+    preproc = create_featreg_preproc_smooth.create_featreg_preproc_smooth(whichvol='first') #GAC
+    
     modelfit = create_modelfit_workflow()
     fixed_fx = create_fixed_effects_flow()
     if subjects_dir:
@@ -1129,9 +1133,10 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
                                   ])])
     wf.connect(mergefunc, 'out_files', registration, 'inputspec.source_files')
     
+    
     reg_func_flag = False
     if reg_func_flag:  
-        #Transform the realigned, hpf functionanl data from preproc into MNI152 space
+        #Transform the realigned, hpf functional data from preproc into MNI152 space
         registration_func=registration.clone(name='registration_func')
         wf.connect(calc_median, 'median_file', registration_func, 'inputspec.mean_image')        
         wf.connect(infosource, 'subject_id', registration_func, 'inputspec.subject_id')      
@@ -1299,7 +1304,17 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
     Set processing parameters
     """
 
-    preproc.inputs.inputspec.fwhm = fwhm
+    #preproc.inputs.inputspec.fwhm = fwhm #GAC
+    #preproc.inputs.inputspec.vol_fwhm = 6.1234 #GAC
+    
+    
+    #wf.connect(registration, 'outputspec.out_reg_file', preproc, 'inputspec.reg_file') #GAC, creates a nonDAG graph
+    #preproc.inputs.inputspec.reg_file= os.path.join('/om/scratch/Fri/gr21783/voice/20170214_smooth',
+    #                                         '05cf281c050be3da4eecf3bc6e8aac1b/model457/task005/854/bids',
+    #                                         'registration/_model_id_457_subject_id_sub-voice854_task_id_5', 
+    #                                         'bbregister/median_bbreg_sub-voice854.dat')    
+    
+    
     gethighpass.inputs.hpcutoff = hpcutoff
     modelspec.inputs.high_pass_filter_cutoff = hpcutoff
     if sparse_flag:
@@ -1429,13 +1444,15 @@ if __name__ == '__main__':
     if not (args.crashdump_dir is None):
         wf.config['execution']['crashdump_dir'] = args.crashdump_dir
 
+    wf.write_graph(graph2use='flat', format='svg', simple_form=True)
+    
     if args.plugin_args:
         wf.run(args.plugin, plugin_args=eval(args.plugin_args))
     else:
         print('-- no sbatch args --')
-        wf.run('SLURM', plugin_args={'sbatch_args': '-N1 -c1','max_jobs':10}) 
+        wf.run('SLURM', plugin_args={'sbatch_args': '-N1 -c1 --qos=gablab','max_jobs':10}) 
         #wf.run(args.plugin)
 
-    wf.write_graph(graph2use='colored', format='svg', simple_form=True)
+    wf.write_graph(graph2use='flat', format='svg', simple_form=True)
 
 
