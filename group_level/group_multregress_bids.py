@@ -127,7 +127,7 @@ def run_palm(cope_file, design_file, contrast_file, group_file, mask_file,
     from glob import glob
     from nipype.interfaces.base import CommandLine
     cmd = ("palm -i {cope_file} -m {mask_file} -d {design_file} -t {contrast_file} -eb {group_file} -T " 
-           "-C {cluster_threshold} -Cstat extent -fdr -noniiclass -twotail -logp -zstat -n 10000")
+           "-C {cluster_threshold} -Cstat extent -fdr -noniiclass -twotail -zstat -n 1000 -logp -ee -ise -nouncorrected")
     cl = CommandLine(cmd.format(cope_file=cope_file, mask_file=mask_file, design_file=design_file, 
                                 contrast_file=contrast_file,
                                 group_file=group_file, cluster_threshold=cluster_threshold))
@@ -342,12 +342,16 @@ if __name__ == '__main__':
                                     sub_list_file=args.sub_list_file, 
                                     behav_file=args.behav_file, 
                                     group_contrast_file=args.group_contrast_file)
-    wf.config['execution']['poll_sleep_duration'] = args.sleep
-    wf.config['execution']['job_finished_timeout'] = 5
+    wf.config['execution']['poll_sleep_duration'] = 20 #args.sleep
+    wf.config['execution']['job_finished_timeout'] = 1000
     if not (args.crashdump_dir is None):
         wf.config['execution']['crashdump_dir'] = args.crashdump_dir    
 
     if args.plugin_args:
+        print('-unlimited jobs-')
         wf.run(args.plugin, plugin_args=eval(args.plugin_args))
     else:
-        wf.run(args.plugin)
+        #wf.run(args.plugin)
+        print('--limiting jobs')
+        #wf.run('SLURM', plugin_args={'sbatch_args': '-N1 -c1','max_jobs':10})
+	wf.run(plugin='MultiProc', plugin_args={'n_procs' : 10})        
