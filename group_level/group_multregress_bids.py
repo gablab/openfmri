@@ -127,7 +127,7 @@ def run_palm(cope_file, design_file, contrast_file, group_file, mask_file,
     from glob import glob
     from nipype.interfaces.base import CommandLine
     cmd = ("palm -i {cope_file} -m {mask_file} -d {design_file} -t {contrast_file} -eb {group_file} -T " 
-           "-C {cluster_threshold} -Cstat extent -fdr -noniiclass -twotail -zstat -n 1000 -logp -ee -ise -nouncorrected")
+           "-C {cluster_threshold} -Cstat extent -fdr -noniiclass -twotail -zstat -n 10000 -logp -ee -ise")
     cl = CommandLine(cmd.format(cope_file=cope_file, mask_file=mask_file, design_file=design_file, 
                                 contrast_file=contrast_file,
                                 group_file=group_file, cluster_threshold=cluster_threshold))
