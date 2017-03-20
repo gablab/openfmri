@@ -1433,8 +1433,8 @@ if __name__ == '__main__':
         wf.run(args.plugin, plugin_args=eval(args.plugin_args))
     else:
         print('-- no sbatch args --')
-        wf.run('SLURM', plugin_args={'sbatch_args': '-N1 -c1','max_jobs':10}) 
-        #wf.run(args.plugin)
+        #wf.run('SLURM', plugin_args={'sbatch_args': '-N1 -c1','max_jobs':10}) 
+        wf.run(args.plugin)
 
     wf.write_graph(graph2use='flat', format='svg', simple_form=True)
 
