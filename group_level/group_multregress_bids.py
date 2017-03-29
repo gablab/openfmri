@@ -212,7 +212,7 @@ def group_multregress_openfmri(dataset_dir, model_id=None, task_id=None, l1outpu
                             name='palm')
                 palm.inputs.cluster_threshold = 3.09
                 palm.inputs.mask_file = mask_file
-                palm.plugin_args = {'sbatch_args': '-p om_all_nodes -N1 -c2 --mem=10G', 'overwrite': True}
+                palm.plugin_args = {'sbatch_args': '-p om_all_nodes -N1 -c2 --mem=10G --time=23:00:00', 'overwrite': True}
                 wk.connect(model, 'design_mat', palm, 'design_file')
                 wk.connect(model, 'design_con', palm, 'contrast_file')
                 wk.connect(mergecopes, 'merged_file', palm, 'cope_file')
@@ -343,15 +343,17 @@ if __name__ == '__main__':
                                     behav_file=args.behav_file, 
                                     group_contrast_file=args.group_contrast_file)
     wf.config['execution']['poll_sleep_duration'] = 20 #args.sleep
-    wf.config['execution']['job_finished_timeout'] = 1000
+    wf.config['execution']['job_finished_timeout'] = 300
     if not (args.crashdump_dir is None):
         wf.config['execution']['crashdump_dir'] = args.crashdump_dir    
 
+    wf.write_graph(graph2use='flat', format='svg', simple_form=True)
+    
     if args.plugin_args:
         print('-unlimited jobs-')
         wf.run(args.plugin, plugin_args=eval(args.plugin_args))
     else:
         #wf.run(args.plugin)
         print('--limiting jobs')
-        #wf.run('SLURM', plugin_args={'sbatch_args': '-N1 -c1','max_jobs':10})
-	wf.run(plugin='MultiProc', plugin_args={'n_procs' : 10})        
+        wf.run('SLURM', plugin_args={'sbatch_args': '-N1 -c1 --time=23:00:00','max_jobs':150})
+	#wf.run(plugin='MultiProc', plugin_args={'n_procs' : 10})        
