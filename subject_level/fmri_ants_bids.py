@@ -13,7 +13,7 @@ This script demonstrates how to use nipype to analyze a data set::
 """
 
 from nipype import config
-config.enable_provenance()
+#config.enable_provenance()
 
 import six
 
@@ -25,7 +25,7 @@ import nipype.algorithms.modelgen as model
 import nipype.algorithms.rapidart as ra
 import nipype.interfaces.fsl as fsl
 import nipype.interfaces.ants as ants
-from nipype.algorithms.misc import TSNR
+from nipype.algorithms.confounds import TSNR
 from nipype.interfaces.c3 import C3dAffineTool
 import nipype.interfaces.io as nio
 import nipype.interfaces.utility as niu
@@ -528,7 +528,7 @@ def create_fs_reg_workflow(name='registration'):
 Get info for a given subject
 """
 
-def get_subjectinfo(subject_id, base_dir, task_id, model_id, session_id=None):
+def get_subjectinfo(subject_id, base_dir, task_id, model_id, session_id=None, run_id=None):
     """Get info for a given subject
     Parameters
     ----------
@@ -553,7 +553,7 @@ def get_subjectinfo(subject_id, base_dir, task_id, model_id, session_id=None):
     import os
     import numpy as np
     import re
-    
+
     condition_info = []
     cond_file = os.path.join(base_dir, 'code', 'model', 'model%03d' % model_id,
                                  'condition_key.txt') 
@@ -564,16 +564,15 @@ def get_subjectinfo(subject_id, base_dir, task_id, model_id, session_id=None):
     if len(condition_info) == 0:
         raise ValueError('No condition info found in %s' % cond_file)
     taskinfo = np.array(condition_info)
-    #n_tasks = np.unique(taskinfo[:, 0])
-    n_tasks = []
-    for x in taskinfo[:, 0]:
-        if x not in n_tasks:
-            n_tasks.append(x)
+
+    task_list = list(set(taskinfo[:, 0]))
+    n_tasks = len(task_list)
+
     conds = []
     run_ids = []
-    if task_id > len(n_tasks):
-        raise ValueError('Task id %s does not exist' % task_id)
-    for idx,task in enumerate(n_tasks):
+
+
+    for idx,task in enumerate(task_list):
         taskidx = np.where(taskinfo[:, 0] == '%s'%(task))
         conds.append([condition.replace(' ', '_') for condition
                       in taskinfo[taskidx[0], 2]]) # if 'junk' not in condition])
@@ -588,7 +587,7 @@ def get_subjectinfo(subject_id, base_dir, task_id, model_id, session_id=None):
                                              subject_id,
                                              'func',
                                              '*%s*.nii.gz'%(task))))
-            
+
         try:
             runs = [int(re.search('(?<=run-)\d+',os.path.basename(val)).group(0)) for val in files]
         except AttributeError:
@@ -597,7 +596,7 @@ def get_subjectinfo(subject_id, base_dir, task_id, model_id, session_id=None):
     # TR should be same across runs
     if session_id:
         json_info = glob(os.path.join(base_dir, subject_id, session_id, 
-                                      'func','*%s*.json'%(n_tasks[task_id-1])))[0]
+                                      'func','*%s*.json'%(task)))[0]
     else:    
         json_info = glob(os.path.join(base_dir, subject_id, 'func',
                                      '*%s*.json'%(n_tasks[task_id-1])))[0]
@@ -606,13 +605,23 @@ def get_subjectinfo(subject_id, base_dir, task_id, model_id, session_id=None):
         with open(json_info, 'rt') as fp:
             data = json.load(fp)
             TR = data['RepetitionTime']
+            delay = data['global']['const']['CsaSeries.MrPhoenixProtocol.lDelayTimeInTR']/1000000.
+            TA = TR - delay  
     else:
         task_scan_key = os.path.join(base_dir, 'code', 'scan_key.txt')
         if os.path.exists(task_scan_key):
             TR = np.genfromtxt(task_scan_key)[1]
         else:
             TR = np.genfromtxt(os.path.join(base_dir, 'scan_key.txt'))[1]
-    return run_ids[task_id - 1], conds[task_id - 1], TR
+            
+    if run_id==None:
+        run_list_process = run_ids[0]
+    else:
+        run_list_process = run_id
+    
+    print('==================================== process run list ======================')
+    print(run_list_process)
+    return run_list_process, conds[0], TR, TA
 
 
 """
@@ -638,7 +647,13 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
                              task_id=None, output_dir=None, subj_prefix='*',
                              hpcutoff=120., use_derivatives=True,
                              fwhm=6.0, subjects_dir=None, target=None, 
-                             session_id=None):
+                             session_id=None,
+                             run_id=None,
+                             sparse_flag=False,
+                             ppi_flag=False,                            
+                             ppi_roi=None,
+                             ppi_base_directory=None):
+
     """Analyzes an open fmri dataset
 
     Parameters
@@ -693,13 +708,14 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
                                 ('task_id', task_id)]
 
     subjinfo = pe.Node(niu.Function(input_names=['subject_id', 'base_dir',
-                                                 'task_id', 'model_id', 'session_id'],
-                                    output_names=['run_id', 'conds', 'TR'],
+                                                 'task_id', 'model_id', 'session_id', 'run_id'],
+                                    output_names=['run_id', 'conds', 'TR', 'TA'],
                                     function=get_subjectinfo),
                        name='subjectinfo')
     #subjinfo.inputs.base_dir = None ## update with argumentparse eventually
     subjinfo.inputs.base_dir = data_dir
     subjinfo.inputs.session_id = session_id
+    subjinfo.inputs.run_id = run_id
 
     """
     Get task name (BIDS)
@@ -756,13 +772,13 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
 
         else:
             datasource.inputs.field_template = {'anat': '%s/%s/anat/*T1w.nii.gz',
-                                                'bold': '%s/%s/func/*task-%s_*bold.nii.gz',
+                                                'bold': '%s/%s/func/*task-%s_run-%02d_bold.nii.gz',
                                                 'behav': ('code/model/model%03d/onsets/%s/task%03d_'
                                                           'run%03d/cond*.txt'), 
                                                 'contrasts': ('code/model/model%03d/'
                                                               'task_contrasts.txt')}
             datasource.inputs.template_args = {'anat': [['subject_id', 'session_id']],
-                                           'bold': [['subject_id', 'session_id','task_name']],
+                                           'bold': [['subject_id', 'session_id','task_name', 'run_id']],
                                            'behav': [['model_id', 'subject_id',
                                                       'task_id', 'run_id']],
                                            'contrasts': [['model_id']]}
@@ -848,20 +864,118 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
                      iterfield=['realigned_files', 'realignment_parameters',
                                 'mask_file'],
                      name="art")
+    if sparse_flag:
+        print("Using sparse model")
+        modelspec = pe.Node(interface=model.SpecifySparseModel(),
+                            name="modelspec")
+        modelspec.inputs.stimuli_as_impulses=False #GAC, added but not sure if this is relevant
+        modelspec.inputs.model_hrf=True # GAC added 2/8/2015
+    else:
+        modelspec = pe.Node(interface=model.SpecifyModel(),
+                               name="modelspec")
 
-    modelspec = pe.Node(interface=model.SpecifyModel(),
-                           name="modelspec")
     modelspec.inputs.input_units = 'secs'
 
+############
+    if ppi_flag and sparse_flag:
+        print("setting up all the ppi code")
+        # Ported from K. Sitek mit openfmri, obidssparse branch
+        # subject_id sub-voice854
+        def subtract_1(run_id):
+            run_id_0index = []
+            [run_id_0index.append(run-1) for run in run_id]
+            return run_id_0index
+        sub_1 = pe.Node(niu.Function(input_names=['run_id'],
+                                           output_names=['run_id_0index'],
+                                           function=subtract_1),
+                              name='sub_1')
+        wf.connect(subjinfo, 'run_id', sub_1, 'run_id') # but will it be 1 off? indexed by 0
+
+        datasource_timeseries = pe.Node(nio.DataGrabber(infields=['subject_id', 'run_id',
+                                                   'task_id', 'model_id'],
+                                         outfields=['aparc_timeseries_file']),
+                         name='datasource_timeseries')
+        datasource_timeseries.inputs.base_directory = ppi_base_directory
+        datasource_timeseries.inputs.template = '*'
+        datasource_timeseries.inputs.sort_filelist=True
+        datasource_timeseries.inputs.field_template = {'aparc_timeseries_file': ('model%02d/task%03d/%s/timeseries/'
+                                                        'aparc/_aparc_ts%d/aparc+aseg_warped_avgwf.txt')}
+        datasource_timeseries.inputs.template_args = {'aparc_timeseries_file': [['model_id',
+                                                            'task_id','subject_id','run_id']]}
+        wf.connect(infosource, 'subject_id', datasource_timeseries, 'subject_id')
+        wf.connect(infosource, 'model_id', datasource_timeseries, 'model_id')
+        wf.connect(infosource, 'task_id', datasource_timeseries, 'task_id')
+        wf.connect(sub_1, 'run_id_0index', datasource_timeseries, 'run_id') # but will it be 1 off? indexed by 0
+
+        def model_ppi_func(session_info,ppi_aparc_timeseries_file, ppi_roi, ppi_base_directory):
+            # Assumes that previous L1 run had three conditions (e.g., emo happy,sad,neutral)
+            # These get summed together to create the single task regressor
+            # The ppi_aparc_timeseries file contains the physiological regressors.  Pick one for the seed region
+            # The column labels for the regions in the aparc+aseg_warped_avgwf.txt file are in the summary.stats file
+            # ppi_roi (string) 'ctx-lh-medialorbitofrontal'.  Seed region.
+            # ppi_base_directory (string) path to L1 analysis from which seed waveforms will be pulled
+
+            print("model ppi function")
+            print(session_info)
+
+            import numpy as np
+            from copy import copy
+            import pandas as pd
+            import os
+
+            session_info_ppi = copy(session_info)
+            for idx,info in enumerate(session_info):
+
+                # Read in lookup table to map string roi to index in waveform table
+                # Assumes that the lookup table is the same for all the aparc timeseries
+                df = pd.read_csv(os.path.join(os.path.split(ppi_aparc_timeseries_file[idx])[0], 
+                                              'summary.stats'), skiprows=52, delim_whitespace=True)
+                df_clean = df.iloc[:,:-2]
+                df_clean.columns = df.columns[2:] # Fix headers
+                ppi_idx_roi = df_clean[df_clean['StructName']==ppi_roi].index[0]
+
+                conds = np.zeros((len(info['regress'][0]['val']),3))
+                for c in range(3):
+                    conds[:,c]=np.array(info['regress'][c]['val'])
+                regress_task_raw = np.sum(conds,1) # 3 conditions in this task
+                regress_task = regress_task_raw/np.max(np.abs(regress_task_raw)) # rescaled to 0:1
+
+                ppi_aparc_timeseries = np.genfromtxt(ppi_aparc_timeseries_file[idx])
+                ppi_timeseries = ppi_aparc_timeseries[:,ppi_idx_roi] # 14= right amygdala roi_list.index('ctx-lh-medialorbitofrontal')
+                regress_phys = ppi_timeseries/np.max(np.abs(ppi_timeseries))
+
+                regress_interact = regress_task * regress_phys
+
+                session_info_ppi[idx]['regress'][0]['val'] = regress_task
+                session_info_ppi[idx]['regress'][1]['val'] = regress_phys
+                session_info_ppi[idx]['regress'][2]['val'] = regress_interact
+
+            return session_info_ppi
+
+        model_ppi = pe.Node(niu.Function(input_names=['session_info','ppi_aparc_timeseries_file',
+                                                      'ppi_roi', 'ppi_base_directory'],
+                                         output_names=['session_info_ppi'],
+                                         function=model_ppi_func),
+                                         name='model_ppi')
+        model_ppi.inputs.ppi_roi = ppi_roi
+        model_ppi.inputs.ppi_base_directory = ppi_base_directory
+        wf.connect(datasource_timeseries, 'aparc_timeseries_file', model_ppi, 'ppi_aparc_timeseries_file')
+    elif ppi_flag and not sparse_flag:
+        print("PPI code requires session_info format as returned by SpecifySparseModel")
+    else:
+        print("Not setting up PPI code")
+
+############
     def check_behav_list(behav, run_id, conds):
         import six
         import numpy as np
+       
         num_conds = len(conds)
         if isinstance(behav, six.string_types):
             behav = [behav]
         behav_array = np.array(behav).flatten()
         num_elements = behav_array.shape[0]
-        return behav_array.reshape(num_elements/num_conds, num_conds).tolist()
+        return behav_array.reshape(int(num_elements/num_conds), num_conds).tolist()
 
     reshape_behav = pe.Node(niu.Function(input_names=['behav', 'run_id', 'conds'],
                                        output_names=['behav'],
@@ -869,6 +983,8 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
                           name='reshape_behav')
 
     wf.connect(subjinfo, 'TR', modelspec, 'time_repetition')
+    if sparse_flag:
+        wf.connect(subjinfo, 'TA', modelspec, 'time_acquisition')
     wf.connect(datasource, 'behav', reshape_behav, 'behav')
     wf.connect(subjinfo, 'run_id', reshape_behav, 'run_id')
     wf.connect(subjinfo, 'conds', reshape_behav, 'conds')
@@ -883,21 +999,46 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
     wf.connect(taskname, 'task_name', contrastgen, 'task_name')
     wf.connect(contrastgen, 'contrasts', modelfit, 'inputspec.contrasts')
 
-    wf.connect([(preproc, art, [('outputspec.motion_parameters',
-                                 'realignment_parameters'),
-                                ('outputspec.realigned_files',
-                                 'realigned_files'),
-                                ('outputspec.mask', 'mask_file')]),
-                (preproc, modelspec, [('outputspec.highpassed_files',
-                                       'functional_runs'),
-                                      ('outputspec.motion_parameters',
-                                       'realignment_parameters')]),
-                (art, modelspec, [('outlier_files', 'outlier_files')]),
-                (modelspec, modelfit, [('session_info',
-                                        'inputspec.session_info')]),
-                (preproc, modelfit, [('outputspec.highpassed_files',
-                                      'inputspec.functional_data')])
-                ])
+    if ppi_flag:
+        print("Connecting ppi blocks")
+        wf.connect([(preproc, art, [('outputspec.motion_parameters',
+                                     'realignment_parameters'),
+                                    ('outputspec.realigned_files',
+                                     'realigned_files'),
+                                    ('outputspec.mask', 'mask_file')]),
+                    (preproc, modelspec, [('outputspec.highpassed_files',
+                                           'functional_runs'),
+                                          ('outputspec.motion_parameters',
+                                           'realignment_parameters')]),
+                    (art, modelspec, [('outlier_files', 'outlier_files')]),
+                    (modelspec, model_ppi, [('session_info',
+                                            'session_info')]),
+                    (model_ppi, modelfit, [('session_info_ppi',
+                                            'inputspec.session_info')]),
+                    (preproc, modelfit, [('outputspec.highpassed_files',
+                                          'inputspec.functional_data')])
+                    ])
+
+    else:
+        print("Not connecting ppi nodes")
+        wf.connect([(preproc, art, [('outputspec.motion_parameters',
+                                     'realignment_parameters'),
+                                    ('outputspec.realigned_files',
+                                     'realigned_files'),
+                                    ('outputspec.mask', 'mask_file')]),
+                    (preproc, modelspec, [('outputspec.highpassed_files',
+                                           'functional_runs'),
+                                          ('outputspec.motion_parameters',
+                                           'realignment_parameters')]),
+                    (art, modelspec, [('outlier_files', 'outlier_files')]),
+                    (modelspec, modelfit, [('session_info',
+                                            'inputspec.session_info')]),
+                    (preproc, modelfit, [('outputspec.highpassed_files',
+                                          'inputspec.functional_data')])
+                    ])
+
+
+
 
     # Comute TSNR on realigned data regressing polynomials upto order 2
     tsnr = MapNode(TSNR(regress_poly=2), iterfield=['in_file'], name='tsnr')
@@ -926,8 +1067,8 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
         n_runs = len(copes)
         all_copes = np.array(copes).flatten()
         all_varcopes = np.array(varcopes).flatten()
-        outcopes = all_copes.reshape(len(all_copes)/num_copes, num_copes).T.tolist()
-        outvarcopes = all_varcopes.reshape(len(all_varcopes)/num_copes, num_copes).T.tolist()
+        outcopes = all_copes.reshape(int(len(all_copes)/num_copes), num_copes).T.tolist()
+        outvarcopes = all_varcopes.reshape(int(len(all_varcopes)/num_copes), num_copes).T.tolist()
         return outcopes, outvarcopes, n_runs
 
     cope_sorter = pe.Node(niu.Function(input_names=['copes', 'varcopes',
@@ -987,6 +1128,15 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
                                   ('zstats', 'zstats'),
                                   ])])
     wf.connect(mergefunc, 'out_files', registration, 'inputspec.source_files')
+    
+    reg_func_flag = False
+    if reg_func_flag:  
+        #Transform the realigned, hpf functionanl data from preproc into MNI152 space
+        registration_func=registration.clone(name='registration_func')
+        wf.connect(calc_median, 'median_file', registration_func, 'inputspec.mean_image')        
+        wf.connect(infosource, 'subject_id', registration_func, 'inputspec.subject_id')      
+        wf.connect(preproc, 'outputspec.highpassed_files', registration_func, 
+                                              'inputspec.source_files')
 
     def split_files(in_files, splits):
         copes = in_files[:splits[0]]
@@ -1071,7 +1221,12 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
         subs.append(('/model%03d/task%03d_' % (model_id, task_id), '/'))
         subs.append(('_bold_dtype_mcf_bet_thresh_dil', '_mask'))
         subs.append(('mask/model%03d/task%03d/' % (model_id, task_id), 'mask/'))
+        subs.append(('art/model%03d/task%03d/' % (model_id, task_id), 'art/'))
         subs.append(('tsnr/model%03d/task%03d/' % (model_id, task_id), 'tsnr/'))
+        subs.append(('model/model%03d/task%03d/' % (model_id, task_id), 'model/'))
+        subs.append(('motion/model%03d/task%03d/' % (model_id, task_id), 'motion/'))
+        subs.append(('copes/roi/model%03d/task%03d/' % (model_id, task_id), 'copes/roi/'))
+        subs.append(('realigned/model%03d/task%03d/' % (model_id, task_id), 'realigned/'))        
         subs.append(('_output_warped_image', '_anat2target'))
         subs.append(('median_flirt_brain_mask', 'median_brain_mask'))
         subs.append(('median_bbreg_brain_mask', 'median_brain_mask'))
@@ -1115,6 +1270,8 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
     wf.connect(art, 'outlier_files', datasink, 'qa.art.@outlier_files')
     wf.connect(registration, 'outputspec.anat2target', datasink, 'qa.anat2target')
     wf.connect(tsnr, 'tsnr_file', datasink, 'qa.tsnr.@map')
+    wf.connect(tsnr, 'stddev_file', datasink, 'qa.tsnr.@stddev')
+    wf.connect(tsnr, 'mean_file', datasink, 'qa.tsnr.@mean')    
     if subjects_dir:
         wf.connect(registration, 'outputspec.min_cost_file', datasink, 'qa.mincost')
         wf.connect([(get_roi_tsnr, datasink, [('avgwf_txt_file', 'qa.tsnr'),
@@ -1123,6 +1280,8 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
                                               ('summary_file', 'copes.roi.@summary')])])
         wf.connect(sampleaparc, 'summary_file', datasink, 'timeseries.aparc.@summary')
         wf.connect(sampleaparc, 'avgwf_txt_file', datasink, 'timeseries.aparc')
+        wf.connect(registration, 'outputspec.out_reg_file', datasink, 'qa.bbregister')
+        
     wf.connect([(splitfunc, datasink,
                  [('copes', 'copes.mni'),
                   ('varcopes', 'varcopes.mni'),
@@ -1132,7 +1291,10 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
     wf.connect(registration, 'outputspec.transformed_mean', datasink, 'mean.mni')
     wf.connect(registration, 'outputspec.func2anat_transform', datasink, 'xfm.mean2anat')
     wf.connect(registration, 'outputspec.anat2target_transform', datasink, 'xfm.anat2target')
-
+    wf.connect(preproc, 'outputspec.highpassed_files', datasink, 'qa.highpass')
+    wf.connect(preproc, 'outputspec.realigned_files', datasink, 'qa.realigned')
+    #wf.connect(registration_func, 'outputspec.transformed_files', datasink, 'xfm_func')
+    
     """
     Set processing parameters
     """
@@ -1140,7 +1302,12 @@ def analyze_openfmri_dataset(data_dir, subject=None, model_id=None,
     preproc.inputs.inputspec.fwhm = fwhm
     gethighpass.inputs.hpcutoff = hpcutoff
     modelspec.inputs.high_pass_filter_cutoff = hpcutoff
-    modelfit.inputs.inputspec.bases = {'dgamma': {'derivs': use_derivatives}}
+    if sparse_flag:
+        print("Setting modelfit.inputs.inputspec.bases to None.")
+        modelfit.inputs.inputspec.bases = {'none': {'none': None}}
+    else:
+        print("Setting modelfit.inputs.inputspec.bases to dgamma.")
+        modelfit.inputs.inputspec.bases = {'dgamma': {'derivs': use_derivatives}}
     modelfit.inputs.inputspec.model_serial_correlations = True
     modelfit.inputs.inputspec.film_threshold = 1000
 
@@ -1189,8 +1356,19 @@ if __name__ == '__main__':
                               "OASIS-30_Atropos_template_in_MNI152_2mm.nii.gz"))
     parser.add_argument("--session_id", dest="session_id", default=None,
                         help="Session id, ses-1")
+    parser.add_argument("--run_id", dest="run_id", default=None,
+                        help="Run id list: 1,2 or 1 or 2")    
+    parser.add_argument("--sparse_flag", dest="sparse_flag", default=False,
+                        help="Default False, use nipype.algorithms.modelgen.SpecifyModel.  If True, use SpecifySparseModel instead.") 
     parser.add_argument("--crashdump_dir", dest="crashdump_dir",
                         help="Crashdump dir", default=None)
+    parser.add_argument("--ppi_flag", dest="ppi_flag",
+                        help="Perform ppi for voice project", default=False)
+    parser.add_argument("--ppi_roi", dest="ppi_roi",
+                        help="PPI roi seed region string from summary.txt\n Right-Thalamus-Proper", default=None)
+    parser.add_argument("--ppi_base_directory", dest="ppi_base_directory",
+                        help="L1 analysis base directory from which seed waveform will be taken for PPI\n" \
+                             +  "/om/project/voice/processedData/l1analysis/l1output_2016102908", default=None)
 
     args = parser.parse_args()
     outdir = args.outdir
@@ -1205,7 +1383,25 @@ if __name__ == '__main__':
                           'task%03d' % int(args.task))
     derivatives = args.derivatives
     if derivatives is None:
-       derivatives = False
+        derivatives = False
+        
+    if args.run_id == 'None':
+        args.run_id = None
+    elif args.run_id is not None:
+        args.run_id = [int(i) for i in args.run_id.split(',')]
+
+    if args.sparse_flag:
+        if args.sparse_flag=='True':
+            sparse_flag = True
+        else:
+            sparse_flag = False
+    if args.ppi_flag:
+        if args.ppi_flag=='True':
+            ppi_flag = True
+        else:
+            ppi_flag = False    
+
+        
     wf = analyze_openfmri_dataset(data_dir=os.path.abspath(args.datasetdir),
                                   subject=args.subject,
                                   model_id=int(args.model),
@@ -1217,9 +1413,17 @@ if __name__ == '__main__':
                                   fwhm=args.fwhm,
                                   subjects_dir=args.subjects_dir,
                                   target=args.target_file,
-                                  session_id=args.session_id)
+                                  session_id=args.session_id,
+                                  run_id=args.run_id,
+                                  sparse_flag=sparse_flag,
+                                  ppi_flag=ppi_flag,
+                                  ppi_roi=args.ppi_roi,
+                                  ppi_base_directory=args.ppi_base_directory)
+
     #wf.config['execution']['remove_unnecessary_outputs'] = False
-    wf.config['execution']['poll_sleep_duration'] = 2
+    wf.config['execution']['poll_sleep_duration'] = 20 #args.sleep
+    wf.config['execution']['job_finished_timeout'] = 60
+    
     wf.base_dir = work_dir
     
     if not (args.crashdump_dir is None):
@@ -1228,9 +1432,9 @@ if __name__ == '__main__':
     if args.plugin_args:
         wf.run(args.plugin, plugin_args=eval(args.plugin_args))
     else:
-        #wf.run('SLURM', plugin_args={'sbatch_args': '-p om_interactive -N1 -c1','max_jobs':40}) 
+        print('-- no sbatch args --')
+        #wf.run('SLURM', plugin_args={'sbatch_args': '-N1 -c1','max_jobs':10}) 
         wf.run(args.plugin)
 
-
-
+    wf.write_graph(graph2use='flat', format='svg', simple_form=True)
 

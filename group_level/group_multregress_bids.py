@@ -3,11 +3,35 @@ ROUGH DRAFT
 
 for help:
 contact: annepark@mit.edu
+
+
+Example call:
+
+python /git/gopenfmri/group_level/group_multregress_bids.py \
+-m 124 \
+-t 5 \
+-d /om/project/voice/bids/data/ \
+-l1 /om/project/voice/processedData/l1analysis/l1output_20160901a/ \
+-o /om/project/voice/processedData/groupAnalysis/l2output_20160901a/ \
+-w /om/scratch/Fri/user/group_voice`date +%Y%m%d%H%M%S`/ \
+-p 'SLURM' --plugin_args "{'sbatch_args':'-p om_all_nodes'}" \
+-s /om/project/voice/processedData/openfmri/groups/user/20160904/participant_key.txt \
+-b /om/project/voice/processedData/openfmri/groups/user/20160904/behav.txt \
+-g /om/project/voice/processedData/openfmri/groups/user/20160904/contrasts.txt
+
+## Required files
+#  participant_key.txt
+#  behav.txt
+#  contrasts.txt
+
+## Additional documentation
+https://github.mit.edu/MGHPCC/OpenMind/wiki/Lab-Specific-Cookbook:-Gabrieli-lab#grouplevelscripts
+
 """
 
 import os
 from nipype import config
-config.enable_provenance()
+#config.enable_provenance()
 
 from nipype import Workflow, Node, MapNode, Function
 from nipype import DataGrabber, DataSink
@@ -47,15 +71,15 @@ def get_taskname(base_dir, task_id):
             if 'task%03d'%(task_id) in info:
                 return info[1]
 
-def get_sub_vars(dataset_dir, task_name, model_id, sub_list_file, behav_file, group_contrast_file):
+def get_sub_vars(task_name, model_id, sub_list_file, behav_file, group_contrast_file):
     import numpy as np
     import os
     import pandas as pd
-    import re
-    #sub_list_file = os.path.join(dataset_dir, 'code', 'groups', 'participant_key.txt')
-    #behav_file = os.path.join(dataset_dir, 'code', 'groups', 'behav.txt')
-    #group_contrast_file = os.path.join(dataset_dir, 'code', 'groups', 'contrasts.txt')  
+    import re  
 
+    # Read in all subjects in participant_key ("sub_list_file")
+    # Process only subjects with a nonzero number
+    # Check to make sure every subject to be processed has a line in behav.txt ("behav_file")
     subs_list = pd.read_table(sub_list_file, index_col=0)['task-%s' % task_name]
     subs_needed = subs_list.index[np.nonzero(subs_list)[0]]
     behav_info = pd.read_table(behav_file,  delim_whitespace=True, index_col=0)
@@ -80,7 +104,7 @@ def get_sub_vars(dataset_dir, task_name, model_id, sub_list_file, behav_file, gr
             if val not in behav_info.keys():
                 raise ValueError('Regressor %s not in behav.txt file' % val)
         contrast_name = row.split()[1]
-        contrast_vector = np.array(re.search("\]([\s\d]+)", row).group(1).split()).astype(float).tolist()
+        contrast_vector = np.array(re.search("\]([\s\d.-]+)", row).group(1).split()).astype(float).tolist()
         con = [tuple([contrast_name, 'T', regressor_names, contrast_vector])]
         contrasts.append(con)
 
@@ -103,7 +127,7 @@ def run_palm(cope_file, design_file, contrast_file, group_file, mask_file,
     from glob import glob
     from nipype.interfaces.base import CommandLine
     cmd = ("palm -i {cope_file} -m {mask_file} -d {design_file} -t {contrast_file} -eb {group_file} -T " 
-           "-C {cluster_threshold} -Cstat extent -fdr -noniiclass -twotail -logp -zstat")
+           "-C {cluster_threshold} -Cstat extent -fdr -noniiclass -twotail -zstat -n 10000 -logp -ee -ise")
     cl = CommandLine(cmd.format(cope_file=cope_file, mask_file=mask_file, design_file=design_file, 
                                 contrast_file=contrast_file,
                                 group_file=group_file, cluster_threshold=cluster_threshold))
@@ -121,7 +145,7 @@ def group_multregress_openfmri(dataset_dir, model_id=None, task_id=None, l1outpu
     for task in task_id:
         task_name = get_taskname(dataset_dir, task)
         cope_ids = l1_contrasts_num(model_id, task_name, dataset_dir)
-        regressors_needed, contrasts, groups, subj_list = get_sub_vars(dataset_dir, task_name, model_id,
+        regressors_needed, contrasts, groups, subj_list = get_sub_vars(task_name, model_id,
                                                                       sub_list_file, behav_file, group_contrast_file)
         for idx, contrast in enumerate(contrasts):
             wk = Workflow(name='model_%03d_task_%03d_contrast_%s' % (model_id, task, contrast[0][0]))
@@ -152,8 +176,8 @@ def group_multregress_openfmri(dataset_dir, model_id=None, task_id=None, l1outpu
             wk.connect(info, 'model_id', dg, 'model_id')
             wk.connect(info, 'task_id', dg, 'task_id')
 
-            print '------------'
-            print dg
+            print('------------')
+            print(dg)
             
             model = Node(MultipleRegressDesign(), name='l2model')
             model.inputs.groups = groups
@@ -188,7 +212,7 @@ def group_multregress_openfmri(dataset_dir, model_id=None, task_id=None, l1outpu
                             name='palm')
                 palm.inputs.cluster_threshold = 3.09
                 palm.inputs.mask_file = mask_file
-                palm.plugin_args = {'sbatch_args': '-p om_all_nodes -N1 -c2 --mem=10G', 'overwrite': True}
+                palm.plugin_args = {'sbatch_args': '-p om_all_nodes -N1 -c2 --mem=10G --time=23:00:00', 'overwrite': True}
                 wk.connect(model, 'design_mat', palm, 'design_file')
                 wk.connect(model, 'design_con', palm, 'contrast_file')
                 wk.connect(mergecopes, 'merged_file', palm, 'cope_file')
@@ -318,12 +342,18 @@ if __name__ == '__main__':
                                     sub_list_file=args.sub_list_file, 
                                     behav_file=args.behav_file, 
                                     group_contrast_file=args.group_contrast_file)
-    wf.config['execution']['poll_sleep_duration'] = args.sleep
-    
+    wf.config['execution']['poll_sleep_duration'] = 20 #args.sleep
+    wf.config['execution']['job_finished_timeout'] = 300
     if not (args.crashdump_dir is None):
         wf.config['execution']['crashdump_dir'] = args.crashdump_dir    
 
+    wf.write_graph(graph2use='flat', format='svg', simple_form=True)
+    
     if args.plugin_args:
+        print('-unlimited jobs-')
         wf.run(args.plugin, plugin_args=eval(args.plugin_args))
     else:
-        wf.run(args.plugin)
+        #wf.run(args.plugin)
+        print('--limiting jobs')
+        wf.run('SLURM', plugin_args={'sbatch_args': '-N1 -c1 --time=23:00:00','max_jobs':150})
+	#wf.run(plugin='MultiProc', plugin_args={'n_procs' : 10})        
